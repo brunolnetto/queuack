@@ -18,3 +18,15 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["queuack"]
 exclude = ["images"]
+
+[tool.tox]
+envlist = ["py39"]
+
+[tool.tox.testenv.py39]
+deps = [
+    "pytest",
+    "pytest-cov",
+]
+commands = [
+    "pytest --cov=queuack",
+]

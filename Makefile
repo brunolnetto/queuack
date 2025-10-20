@@ -98,5 +98,6 @@ publish: clean ## build source and publish package
 	uv build
 	uv publish
 
-release: bump v=$(v) ## release package on PyPI
+release: ## release package on PyPI
+	$(MAKE) bump v=$(v)
 	$(MAKE) publish
