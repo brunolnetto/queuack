@@ -1,9 +1,9 @@
 [project]
 name = "queuack"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.0.0"
+description = "A DuckDB-based queue manager"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "duckdb>=1.4.1",
 ]
@@ -12,4 +12,5 @@ dependencies = [
 dev = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
+    "ruff>=0.14.1",
 ]
