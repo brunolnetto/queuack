@@ -1,4 +1,4 @@
-# <img src="https://github.com/brunolnetto/queuack/raw/main/images/logo.png" width="32" alt="Queuack Logo"> Queuack — lightweight DuckDB-backed job queue 🦆
+# <img src="https://github.com/brunolnetto/queuack/raw/main/images/logo.png" width="32" alt="Queuack Logo"> Queuack - A lightweight job queue 
 
 <img src="https://github.com/brunolnetto/queuack/raw/main/images/mascot.png" width="200" alt="Queuack Mascot">
 
