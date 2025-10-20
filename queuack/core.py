@@ -36,15 +36,13 @@ Example:
 
 import duckdb
 import pickle
-import json
 import uuid
 import time
 import traceback
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from enum import Enum
-import inspect
 import logging
 
 logging.basicConfig(level=logging.INFO)

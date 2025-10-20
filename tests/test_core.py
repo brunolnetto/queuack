@@ -29,7 +29,6 @@ import time
 import pickle
 import threading
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
 import tempfile
 import os
 
@@ -395,8 +394,7 @@ class TestDuckQueue:
     
     def test_enqueue_backpressure_warning(self, queue):
         # Need to import caplog differently and use logging
-        import logging
-        with pytest.warns() as warning_list:
+        with pytest.warns():
             # Enqueue 1001 jobs to trigger warning
             for i in range(1001):
                 queue.enqueue(add, args=(i, i), check_backpressure=True)
@@ -496,7 +494,7 @@ class TestDuckQueue:
     
     def test_claim_stale_job_recovery(self, queue):
         job_id = queue.enqueue(add, args=(1, 2))
-        job1 = queue.claim(worker_id="worker-1")
+        queue.claim(worker_id="worker-1")
         old_time = datetime.now() - timedelta(seconds=400)
         queue.conn.execute("UPDATE jobs SET claimed_at = ? WHERE id = ?", [old_time, job_id])
         job2 = queue.claim(worker_id="worker-2", claim_timeout=300)
@@ -639,7 +637,7 @@ class TestDuckQueue:
     
     def test_list_dead_letters(self, queue):
         for i in range(3):
-            job_id = queue.enqueue(fail, args=(f"fail-{i}",), max_attempts=1)
+            queue.enqueue(fail, args=(f"fail-{i}",), max_attempts=1)
             job = queue.claim()
             queue.ack(job.id, error=f"Failed {i}")
         dead_letters = queue.list_dead_letters()
@@ -649,7 +647,7 @@ class TestDuckQueue:
     
     def test_list_dead_letters_limit(self, queue):
         for i in range(5):
-            job_id = queue.enqueue(fail, max_attempts=1)
+            queue.enqueue(fail, max_attempts=1)
             job = queue.claim()
             queue.ack(job.id, error="Failed")
         assert len(queue.list_dead_letters(limit=3)) == 3
@@ -660,7 +658,7 @@ class TestDuckQueue:
     # Purge Tests
     def test_purge_done_jobs(self, queue):
         for i in range(3):
-            job_id = queue.enqueue(add, args=(i, i))
+            queue.enqueue(add, args=(i, i))
             job = queue.claim()
             queue.ack(job.id, result=i*2)
         old_time = datetime.now() - timedelta(hours=25)
@@ -671,11 +669,11 @@ class TestDuckQueue:
     
     def test_purge_specific_queue(self, queue):
         for i in range(2):
-            job_id = queue.enqueue(add, args=(i, i), queue="emails")
+            queue.enqueue(add, args=(i, i), queue="emails")
             job = queue.claim(queue="emails")
             queue.ack(job.id, result=i)
         for i in range(3):
-            job_id = queue.enqueue(add, args=(i, i), queue="reports")
+            queue.enqueue(add, args=(i, i), queue="reports")
             job = queue.claim(queue="reports")
             queue.ack(job.id, result=i)
         old_time = datetime.now() - timedelta(hours=25)
@@ -695,7 +693,7 @@ class TestDuckQueue:
         assert count == 1
     
     def test_purge_no_old_jobs(self, queue):
-        job_id = queue.enqueue(add, args=(1, 2))
+        queue.enqueue(add, args=(1, 2))
         job = queue.claim()
         queue.ack(job.id, result=3)
         count = queue.purge(status="done", older_than_hours=24)
@@ -703,7 +701,7 @@ class TestDuckQueue:
     
     def test_purge_all_queues(self, queue):
         for q in ['queue1', 'queue2', 'queue3']:
-            job_id = queue.enqueue(add, args=(1, 2), queue=q)
+            queue.enqueue(add, args=(1, 2), queue=q)
             job = queue.claim(queue=q)
             queue.ack(job.id, result=3)
         old_time = datetime.now() - timedelta(hours=25)
@@ -716,7 +714,8 @@ class TestDuckQueue:
         worker_id = queue._generate_worker_id()
         assert worker_id is not None
         assert isinstance(worker_id, str)
-        import socket, os
+        import socket
+        import os
         assert socket.gethostname() in worker_id
         assert str(os.getpid()) in worker_id
     
@@ -738,7 +737,7 @@ class TestWorker:
         assert worker.queue == queue
         assert worker.concurrency == 1
         assert worker.max_jobs_in_flight == 2
-        assert worker.should_stop == False
+        assert not worker.should_stop
     
     def test_worker_custom_settings(self, queue):
         worker = Worker(queue, queues=['emails', 'reports'], worker_id='custom-worker', 
@@ -759,9 +758,9 @@ class TestWorker:
     
     def test_worker_signal_handler(self, queue):
         worker = Worker(queue)
-        assert worker.should_stop == False
+        assert not worker.should_stop
         worker._signal_handler(None, None)
-        assert worker.should_stop == True
+        assert worker.should_stop
     
     def test_worker_claim_next_job(self, queue):
         worker = Worker(queue, queues=['emails', 'reports'])
@@ -929,7 +928,6 @@ class TestJobDecorator:
         This covers the exception handler in _run_concurrent when future.result()
         raises an exception that wasn't caught by _execute_job.
         """
-        from unittest.mock import patch
         
         worker = Worker(queue, concurrency=2)
         
@@ -961,7 +959,7 @@ class TestJobDecorator:
     def test_decorator_with_kwargs(self, queue):
         decorated_func = job(queue)(decorated_greet)
         
-        job_id = decorated_func.delay("World", greeting="Hi")
+        decorated_func.delay("World", greeting="Hi")
         claimed = queue.claim()
         result = claimed.execute()
         assert result == "Hi, World!"
@@ -1042,9 +1040,9 @@ class TestIntegration:
         assert final_job.attempts == 3
     
     def test_priority_workflow(self, queue):
-        low_id = queue.enqueue(task_priority, args=("low",), priority=10)
-        high_id = queue.enqueue(task_priority, args=("high",), priority=90)
-        med_id = queue.enqueue(task_priority, args=("medium",), priority=50)
+        queue.enqueue(task_priority, args=("low",), priority=10)
+        queue.enqueue(task_priority, args=("high",), priority=90)
+        queue.enqueue(task_priority, args=("medium",), priority=50)
         
         results = []
         for _ in range(3):
@@ -1099,7 +1097,7 @@ class TestIntegration:
     
     def test_batch_workflow(self, queue):
         jobs_list = [(add_ten, (i,), {}) for i in range(5)]
-        job_ids = queue.enqueue_batch(jobs_list)
+        queue.enqueue_batch(jobs_list)
         
         results = []
         for _ in range(5):
@@ -1112,7 +1110,7 @@ class TestIntegration:
     
     def test_dead_letter_workflow(self, queue):
         for i in range(3):
-            job_id = queue.enqueue(always_fails, max_attempts=2)
+            queue.enqueue(always_fails, max_attempts=2)
         
         for _ in range(3):
             for _ in range(2):
@@ -1171,7 +1169,7 @@ class TestEdgeCases:
     """
     
     def test_empty_args(self, queue):
-        job_id = queue.enqueue(no_args)
+        queue.enqueue(no_args)
         job = queue.claim()
         result = job.execute()
         assert result == "no args"

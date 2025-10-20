@@ -71,7 +71,7 @@ if __name__ == "__main__":
     threading.Thread(target=stop_worker, daemon=True).start()
     worker.run(poll_interval=0.1)
     
-    print(f"\nAfter processing:")
+    print("\nAfter processing:")
     print(f"Emails queue: {queue.stats('emails')}")
     print(f"Reports queue: {queue.stats('reports')}")
     print(f"Maintenance queue: {queue.stats('maintenance')}")
@@ -193,8 +193,8 @@ if __name__ == "__main__":
     
     final_stats = queue.stats('stream')
     print(f"\nFinal stats: {final_stats}")
-    print(f"  Produced: 20 jobs")
-    print(f"  Consumed: ~10 jobs")
+    print("  Produced: 20 jobs")
+    print("  Consumed: ~10 jobs")
     print(f"  Remaining: {final_stats['pending']} pending")
     
     print("\n" + "=" * 80)
