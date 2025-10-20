@@ -91,10 +91,7 @@ jobs:
       #----------------------------------------------
       - name: Run tests and generate coverage
         run: |
-          uv run pytest --cov=queuack tests/
-
-          # Uncomment when achieve sufficient coverage threshold
-          uv run coverage report -m
+          uv run pytest --cov=queuack --cov-branch --cov-report=xml
 
       #----------------------------------------------
       #       Update codecov coverage
