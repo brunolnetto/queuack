@@ -1,6 +1,6 @@
 [project]
 name = "queuack"
-version = "0.0.1"
+version = "0.1.0"
 description = "A DuckDB-based queue manager"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -14,3 +14,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "ruff>=0.14.1",
 ]
+
+[tool.setuptools.packages.find]
+include = ["queuack"]
+exclude = ["images"]
