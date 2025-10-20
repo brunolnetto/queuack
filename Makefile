@@ -87,7 +87,7 @@ check-bump: # check if bump version is valid
 
 bump: ## bump version to user-provided {patch|minor|major} semantic
 	@$(MAKE) check-bump v=$(v)
-	python3 -c "import tomllib, sys; data = tomllib.load(open('pyproject.toml', 'rb')); parts = list(map(int, data['project']['version'].split('.'))); idx = {'patch': 2, 'minor': 1, 'major': 0}[sys.argv[1]]; parts[idx] += 1; parts[idx+1:] = [0] * (2 - idx); data['project']['version'] = '.'.join(map(str, parts)); open('pyproject.toml', 'w').write(tomllib.dumps(data))" $(v)
+	python3 -c "import tomllib, sys, re; data = tomllib.load(open('pyproject.toml', 'rb')); parts = list(map(int, data['project']['version'].split('.'))); idx = {'patch': 2, 'minor': 1, 'major': 0}[sys.argv[1]]; parts[idx] += 1; parts[idx+1:] = [0] * (2 - idx); new_version = '.'.join(map(str, parts)); content = open('pyproject.toml').read(); updated = re.sub(r'version\s*=\s*\"[0-9]+\.[0-9]+\.[0-9]+\"', f'version = \"{new_version}\"', content); open('pyproject.toml', 'w').write(updated)" $(v)
 	git add pyproject.toml
 	git commit -m "release/ tag v$(PACKAGE_VERSION)"
 	git tag "v$(PACKAGE_VERSION)"
