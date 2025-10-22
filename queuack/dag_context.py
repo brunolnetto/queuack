@@ -1,3 +1,5 @@
+# file: dag_context.py
+
 """
 DAG Context Manager for Queuack - Phase 2 Implementation
 
@@ -24,9 +26,8 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from .status import DAGRunStatus, DependencyMode
-from .exceptions import DAGValidationError
+from .data_models import JobSpec, DAGValidationError
 from .dag import DAGEngine
-from .data_models import JobSpec
 
 # ============================================================================
 # Data Models
@@ -172,12 +173,18 @@ class DAGContext:
         # Add dependencies to validation engine
         if depends_on:
             dep_list = [depends_on] if isinstance(depends_on, str) else depends_on
+            # We'll resolve dependencies in two categories:
+            # - internal parents (names that map to job IDs reserved in this DAG)
+            # - external parents (explicit job IDs created outside this DAG)
+            internal_parents = []
+            external_parents = []
+
             for dep in dep_list:
-                # Resolve dependency to job ID
                 if dep in self.jobs:
-                    parent_id = self.jobs[dep]
+                    internal_parents.append(self.jobs[dep])
                 elif self._is_valid_job_id(dep):
-                    parent_id = dep
+                    # External job id: keep for DB insertion but do not add to engine
+                    external_parents.append(dep)
                 else:
                     if self.fail_fast:
                         raise ValueError(
@@ -186,8 +193,9 @@ class DAGContext:
                         )
                     else:
                         continue
-                
-                # Add edge to validation graph
+
+            # Add only internal parents to the validation graph
+            for parent_id in internal_parents:
                 try:
                     self.engine.add_dependency(job_id, parent_id)
                 except DAGValidationError as e:
@@ -196,6 +204,11 @@ class DAGContext:
                     else:
                         import warnings
                         warnings.warn(f"Validation error: {e}")
+
+            # Store external parents separately on the spec so submit() can insert them
+            # without mutating the original human-friendly spec.depends_on.
+            if external_parents:
+                setattr(spec, '_external_parents', list(external_parents))
         
         return job_id
     
@@ -260,16 +273,30 @@ class DAGContext:
             for node_name, job_id in self.jobs.items():
                 spec = self.job_specs[node_name]
                 
-                # Resolve dependencies to job IDs
-                depends_on_ids = None
+                # Resolve dependencies to job IDs (internal names -> ids, plus any
+                # external parents recorded earlier on the spec)
+                depends_on_ids = []
                 if spec.depends_on:
                     dep_list = [spec.depends_on] if isinstance(spec.depends_on, str) else spec.depends_on
-                    depends_on_ids = []
                     for dep in dep_list:
                         if dep in self.jobs:
                             depends_on_ids.append(self.jobs[dep])
                         elif self._is_valid_job_id(dep):
                             depends_on_ids.append(dep)
+
+                # Include any external parent ids stored earlier (from enqueue time)
+                ext = getattr(spec, '_external_parents', None)
+                if ext:
+                    depends_on_ids.extend(ext)
+
+                # Deduplicate while preserving order
+                seen = set()
+                deduped = []
+                for pid in depends_on_ids:
+                    if pid not in seen:
+                        seen.add(pid)
+                        deduped.append(pid)
+                depends_on_ids = deduped
                 
                 # Insert job with DAG metadata
                 self.queue.conn.execute("""

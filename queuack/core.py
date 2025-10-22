@@ -1,6 +1,4 @@
 # file: core.py
-# dependencies: duckdb>=0.9.0
-# run: python core.py
 
 """
 Queuack: A lightweight, agnostic job queue backed by DuckDB.
@@ -44,10 +42,9 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import logging
 
-from .dag_context import DAGContext
-from .data_models import Job
 from .status import JobStatus
-from .exceptions import BackpressureError
+from .data_models import Job, BackpressureError
+from .dag_context import DAGContext
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -238,6 +235,14 @@ class DuckQueue:
                 PRIMARY KEY (child_job_id, parent_job_id)
             )
         """)
+
+        # Indexes to speed up recursive traversal queries over dependencies
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_job_dependencies_parent ON job_dependencies(parent_job_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_job_dependencies_child ON job_dependencies(child_job_id)"
+        )
 
         # DAG runs table
         conn.execute(
@@ -647,50 +652,65 @@ class DuckQueue:
                     # Propagate permanent failure to descendants: mark them SKIPPED.
                     # Only mark SKIPPED when dependency_mode makes the job unrunnable.
                     try:
-                        # Find all descendants and their dependency modes
-                        self.conn.execute("""
-                            WITH RECURSIVE descendants(child_id) AS (
-                                SELECT child_job_id FROM job_dependencies WHERE parent_job_id = ?
-                                UNION ALL
-                                SELECT jd.child_job_id FROM job_dependencies jd
-                                JOIN descendants d ON jd.parent_job_id = d.child_id
-                            )
-                            UPDATE jobs
-                            SET
-                                status = 'skipped',
-                                skipped_at = ?,
-                                skip_reason = ?,
-                                skipped_by = ?,
-                                attempts = max_attempts,
-                                completed_at = ?
-                            WHERE id IN (
-                                SELECT j.id FROM jobs j
-                                WHERE j.id IN (SELECT child_id FROM descendants)
-                                AND j.status NOT IN ('done', 'failed', 'skipped')
-                                AND (
-                                    -- Mode 'all': Any parent failed/skipped means unrunnable
-                                    (j.dependency_mode = 'all' AND EXISTS (
-                                        SELECT 1 FROM job_dependencies jd
-                                        JOIN jobs pj ON jd.parent_job_id = pj.id
-                                        WHERE jd.child_job_id = j.id
-                                        AND pj.status IN ('failed', 'skipped')
-                                    ))
-                                    OR
-                                    -- Mode 'any': ALL parents failed/skipped means unrunnable
-                                    (j.dependency_mode = 'any' AND NOT EXISTS (
-                                        SELECT 1 FROM job_dependencies jd
-                                        JOIN jobs pj ON jd.parent_job_id = pj.id
-                                        WHERE jd.child_job_id = j.id
-                                        AND pj.status NOT IN ('failed', 'skipped')
-                                    ) AND EXISTS (
-                                        -- Has at least one dependency
-                                        SELECT 1 FROM job_dependencies jd
-                                        WHERE jd.child_job_id = j.id
-                                    ))
+                        # Compute transitive descendants and mark them SKIPPED in two passes:
+                        # 1) dependency_mode = 'all' where ANY parent failed/skipped
+                        # 2) dependency_mode = 'any' where NO parent remains healthy
+                        # This is easier to reason about and avoids complex nested predicates.
+
+                        # Single-pass optimized update: compute all transitive descendants
+                        # then aggregate parent statuses to decide which descendants
+                        # should be skipped according to their dependency_mode.
+                        # Iteratively propagate SKIPPED to transitive descendants.
+                        # We run the recursive-CTE UPDATE repeatedly until no more
+                        # rows are affected. Using UPDATE ... RETURNING lets us
+                        # detect convergence without extra SELECTs.
+                        while True:
+                            updated = self.conn.execute("""
+                                WITH RECURSIVE descendants(child_id) AS (
+                                    SELECT child_job_id FROM job_dependencies WHERE parent_job_id = ?
+                                    UNION ALL
+                                    SELECT jd.child_job_id FROM job_dependencies jd
+                                    JOIN descendants d ON jd.parent_job_id = d.child_id
+                                ), dlist AS (
+                                    SELECT DISTINCT child_id AS id FROM descendants
+                                ), parents AS (
+                                    SELECT
+                                        child.id AS id,
+                                        child.dependency_mode AS dependency_mode,
+                                        SUM(CASE WHEN pj.status NOT IN ('failed','skipped') THEN 1 ELSE 0 END) AS healthy_parents,
+                                        COUNT(*) AS parent_count
+                                    FROM dlist
+                                    JOIN jobs child ON child.id = dlist.id
+                                    JOIN job_dependencies jd ON jd.child_job_id = child.id
+                                    JOIN jobs pj ON pj.id = jd.parent_job_id
+                                    GROUP BY child.id, child.dependency_mode
+                                ), should_skip AS (
+                                    SELECT
+                                        id,
+                                        CASE
+                                            WHEN dependency_mode = 'all' AND healthy_parents < parent_count THEN 1
+                                            WHEN dependency_mode = 'any' AND parent_count > 0 AND healthy_parents = 0 THEN 1
+                                            ELSE 0
+                                        END AS skip_flag
+                                    FROM parents
                                 )
-                            )
-                            AND status NOT IN ('done', 'failed', 'skipped')
-                        """, [job_id, now, f"parent_failed:{job_id}", 'queuack', now])
+                                UPDATE jobs
+                                SET
+                                    status = 'skipped',
+                                    skipped_at = ?,
+                                    skip_reason = ?,
+                                    skipped_by = ?,
+                                    attempts = max_attempts,
+                                    completed_at = ?
+                                FROM should_skip ss
+                                WHERE jobs.id = ss.id
+                                  AND ss.skip_flag = 1
+                                  AND jobs.status NOT IN ('done','failed','skipped')
+                                RETURNING jobs.id
+                            """, [job_id, now, f"parent_failed:{job_id}", 'queuack', now]).fetchall()
+
+                            if not updated:
+                                break
 
                         logger.info(f"Marked descendants of {job_id[:8]} as SKIPPED")
                     except Exception as e:

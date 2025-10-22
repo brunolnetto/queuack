@@ -1,3 +1,57 @@
+# file: data_models.py
+
+"""queuack.data_models
+======================
+
+Lightweight dataclasses used across the Queuack project.
+
+This module defines the canonical in-memory representations for jobs
+and DAG nodes used by the queue core and the DAG engine. The main
+types are:
+
+- ``Job``: a serializable record persisted in the database (the
+    attributes mirror the ``jobs`` table). Fields like ``func``,
+    ``args`` and ``kwargs`` are stored as pickled bytes; consumers
+    should only unpickle them when executing the job. ``Job`` also
+    contains DAG-related metadata (``node_name``, ``dag_run_id``,
+    ``dependency_mode``) which is optional and only used when the job
+    is part of a DAG workflow.
+
+- ``JobSpec``: a convenience value object used when enqueueing new
+    work. This keeps user-level call-sites decoupled from the persisted
+    ``Job`` representation (for example, ``JobSpec.func`` is a
+    callable while ``Job.func`` is ``bytes``).
+
+- ``DAGNode``: an in-memory node used by the DAG engine. ``DAGNode``
+    intentionally uses ``id`` as the canonical identity: ``__hash__``
+    and ``__eq__`` are defined based on ``id`` so nodes are stable when
+    placed in sets or used as dictionary keys.
+
+Important notes and best-practices
+---------------------------------
+
+- Picklability: functions passed to ``enqueue`` must be picklable
+    (module-level callables). Tests should use module-level helper
+    functions (not lambdas or nested functions) when creating jobs.
+
+- Mutable defaults: fields that are mappings (for example
+    ``DAGNode.metadata`` or ``JobSpec.kwargs``) use ``default_factory``
+    or are normalized in ``__post_init__`` to avoid shared mutable
+    defaults across instances.
+
+- Minimal runtime dependencies: this module is intentionally
+    lightweight and avoids importing queue core internals at import
+    time. It only references enums and small types from
+    ``queuack.status`` to keep typing expressive while preventing
+    circular-import problems during package import.
+
+This docstring should be sufficient for contributors to understand
+the role of these dataclasses and to avoid common pitfalls (pickling
+and mutable defaults). For schema-level documentation see the SQL
+schema in ``queuack.core`` where the ``jobs`` table is created.
+"""
+
+
 import pickle
 import logging
 from dataclasses import dataclass
@@ -117,3 +171,21 @@ class DAGNode:
     
     def __eq__(self, other):
         return isinstance(other, DAGNode) and self.id == other.id
+
+
+class BackpressureError(Exception):
+        """Raised when queue depth exceeds safe limits.
+
+        Used to signal producers that the system is overloaded and enqueuing
+        should be deferred or retried with backoff.
+        """
+        pass
+
+
+class DAGValidationError(Exception):
+        """Raised when DAG has structural problems (cycles, invalid nodes).
+
+        This exception should be raised during DAG construction/validation
+        and is not intended to be swallowed silently.
+        """
+        pass

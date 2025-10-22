@@ -223,49 +223,24 @@ def queue():
         except Exception:
             pass
 
-
-@pytest.fixture
-def file_queue():
-    """Create file-based queue for testing."""
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.duckdb') as f:
-        db_path = f.name
-    
-    # Delete the file first - DuckDB will create it
-    os.unlink(f.name)
-    
-    q = DuckQueue(db_path)
-    yield q
-    q.close()
-    
-    # Cleanup
+def noop():
+    return None
 
 
-@pytest.fixture(scope="session")
-def session_queue(tmp_path_factory):
-    """Session-scoped queue: shared DB file for long-running/integration tests.
+def a_func():
+    return 'a'
 
-    Use this fixture when you intentionally want a single queue instance
-    shared across many tests (e.g., heavier integration tests). Most unit
-    tests should keep using the per-test `queue` fixture for isolation.
-    This fixture is intentionally named `session_queue` so it does not
-    override the per-test `queue` fixture used by most tests.
-    """
-    d = tmp_path_factory.mktemp("duckdb")
-    db_path = str(d / "session.duckdb")
 
-    # Ensure no pre-existing file
-    try:
-        os.unlink(db_path)
-    except Exception:
-        pass
+def b_func():
+    return 'b'
 
-    q = FastThresholdQueue(db_path)
-    yield q
-    q.close()
-    try:
-        os.unlink(db_path)
-    except Exception:
-        pass
+
+def c_func():
+    return 'c'
+
+
+def d_func():
+    return 'd'
 
 
 # ============================================================================
@@ -360,9 +335,9 @@ class TestDuckQueue:
         assert queue.default_queue == "default"
         queue.close()
     
-    def test_initialization_file(self, file_queue: DuckQueue):
+    def test_initialization_file(self, queue: DuckQueue):
         """Test queue initialization with file database."""
-        assert os.path.exists(file_queue.db_path)
+        assert os.path.exists(queue.db_path)
     
     def test_initialization_custom_queue(self):
         """Test queue initialization with custom default queue."""
@@ -2368,6 +2343,73 @@ class TestListDeadLettersEdgeCases:
         assert len(dead_letters) == 5
         
         queue.close()
+
+
+def fail_and_check(queue, failed_job_id, expected_skipped_ids):
+    # Force failure by setting attempts = max_attempts
+    queue.conn.execute("UPDATE jobs SET attempts = max_attempts WHERE id = ?", [failed_job_id])
+    queue.ack(failed_job_id, error="permanent")
+
+    for jid in expected_skipped_ids:
+        job = queue.get_job(jid)
+        assert job is not None
+        assert job.status == JobStatus.SKIPPED.value, f"Job {jid} expected SKIPPED, got {job.status}"
+
+
+def test_chain_three_levels(queue):
+    # A -> B -> C
+    a = queue.enqueue(a_func)
+    b = queue.enqueue(b_func, depends_on=a)
+    c = queue.enqueue(c_func, depends_on=b)
+
+    fail_and_check(queue, a, [b, c])
+
+
+def test_diamond_shape(queue):
+    #   A
+    #  / \
+    # B   C
+    #  \ /
+    #   D
+    a = queue.enqueue(a_func)
+    b = queue.enqueue(b_func, depends_on=a)
+    c = queue.enqueue(c_func, depends_on=a)
+    d = queue.enqueue(d_func, depends_on=[b, c], dependency_mode='all')
+
+    fail_and_check(queue, a, [b, c, d])
+
+
+def test_fan_out_with_any(queue):
+    # A -> {B, C, D}; B and C depend on A; D depends on A with 'any'
+    a = queue.enqueue(a_func)
+    b = queue.enqueue(b_func, depends_on=a)
+    c = queue.enqueue(c_func, depends_on=a)
+    d = queue.enqueue(d_func, depends_on=[b, c], dependency_mode='any')
+
+    # Failing A should skip B and C; D depends on any of B/C so it'll be skipped only if both are unhealthy
+    fail_and_check(queue, a, [b, c, d])
+
+
+def test_mixed_any_all_propagation(queue):
+    # Build a more complex graph mixing ANY and ALL
+    # A -> B -> D
+    # A -> C -> D
+    # D depends on [B,C] with 'any' (so if either B or C healthy, D is runnable)
+    a = queue.enqueue(a_func)
+    b = queue.enqueue(b_func, depends_on=a)
+    c = queue.enqueue(c_func, depends_on=a)
+    d = queue.enqueue(d_func, depends_on=[b, c], dependency_mode='any')
+
+    # Fail B permanently; only descendants that become unrunnable should be skipped
+    queue.conn.execute("UPDATE jobs SET attempts = max_attempts WHERE id = ?", [b])
+    queue.ack(b, error="permanent")
+
+    # B should be skipped/failed; D should remain pending because C still healthy
+    jb = queue.get_job(b)
+    jd = queue.get_job(d)
+
+    assert jb.status == JobStatus.SKIPPED.value or jb.status == JobStatus.FAILED.value
+    assert jd.status == JobStatus.PENDING.value
 
 
 if __name__ == "__main__":

@@ -1,3 +1,5 @@
+# file: dag.py
+
 """
 Independent DAG resolution prototype for Queuack.
 
@@ -15,8 +17,7 @@ import networkx as nx
 
 from .job_store import JobStore
 from .status import NodeStatus, DependencyMode
-from .data_models import DAGNode
-from .exceptions import DAGValidationError
+from .data_models import DAGNode, DAGValidationError
 
 
 class DAGEngine:
@@ -321,17 +322,26 @@ class DAGEngine:
     def export_mermaid(self) -> str:
         """
         Export DAG to Mermaid diagram format.
-        
+
         Returns:
             Mermaid markdown string
         """
         lines = ["graph TD"]
-        
+
+        # Create mapping from node_id to sanitized name for cleaner IDs
+        def sanitize_name(name: str) -> str:
+            """Convert name to valid Mermaid node ID."""
+            return name.replace("_", "").replace("-", "").replace(" ", "")
+
         # Add nodes with styling based on status
+        id_mapping = {}
         for node_id, node in self.nodes.items():
+            # Use sanitized name as Mermaid node ID for cleaner output
+            mermaid_id = sanitize_name(node.name)
+            id_mapping[node_id] = mermaid_id
             label = node.name
             style = ""
-            
+
             if node.status == NodeStatus.DONE:
                 style = ":::done"
             elif node.status == NodeStatus.FAILED:
@@ -342,13 +352,15 @@ class DAGEngine:
                 style = ":::running"
             elif node.status == NodeStatus.READY:
                 style = ":::ready"
-            
-            lines.append(f"    {node_id}[\"{label}\"]{style}")
-        
-        # Add edges
+
+            lines.append(f"    {mermaid_id}[\"{label}\"]{style}")
+
+        # Add edges using mapped IDs
         for parent, child in self.graph.edges:
-            lines.append(f"    {parent} --> {child}")
-        
+            parent_id = id_mapping.get(parent, parent)
+            child_id = id_mapping.get(child, child)
+            lines.append(f"    {parent_id} --> {child_id}")
+
         # Add style definitions
         lines.extend([
             "",
@@ -358,9 +370,9 @@ class DAGEngine:
             "    classDef running fill:#87CEEB",
             "    classDef ready fill:#FFD700"
         ])
-        
+
         return "\n".join(lines)
-    
+
     def simulate_execution(self, verbose: bool = True) -> Dict[str, Any]:
         """
         Simulate DAG execution (for testing).
