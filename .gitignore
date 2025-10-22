@@ -1,5 +1,7 @@
 .vscode
 codecov
+uv.lock
+.python_version
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
