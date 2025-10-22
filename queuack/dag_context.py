@@ -22,13 +22,10 @@ import pickle
 import uuid
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from dataclasses import dataclass
-from enum import Enum
 
 from .status import DAGRunStatus, DependencyMode
 from .exceptions import DAGValidationError
 from .dag import DAGEngine
-from .job_store import DuckQueueAdapter
 from .data_models import JobSpec
 
 # ============================================================================

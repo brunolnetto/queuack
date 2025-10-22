@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Any
 
-from enum import Enum
 from dataclasses import field
 from typing import Callable, Tuple, Dict, List, Union
 

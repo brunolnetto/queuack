@@ -13,8 +13,6 @@ from queuack import (
     Job, 
 )
 
-import pickle
-from datetime import datetime
 
 
 def make_job(id):

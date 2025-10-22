@@ -3,7 +3,6 @@
 Keep queue-level and DAG-level states separate but provide helpers to map
 between the two at the boundary.
 """
-from typing import Optional
 from enum import Enum
 
 

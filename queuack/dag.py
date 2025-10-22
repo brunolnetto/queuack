@@ -10,13 +10,11 @@ reimplementing everything from scratch.
 """
 
 from typing import Dict, List, Set, Any, Optional
-from dataclasses import dataclass, field
-from enum import Enum
 
 import networkx as nx
 
 from .job_store import JobStore
-from .status import JobStatus, NodeStatus, DependencyMode
+from .status import NodeStatus, DependencyMode
 from .data_models import DAGNode
 from .exceptions import DAGValidationError
 
