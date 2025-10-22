@@ -1,11 +1,11 @@
-# file: duckqueue.py
+# file: core.py
 # dependencies: duckdb>=0.9.0
-# run: python duckqueue.py
+# run: python core.py
 
 """
-DuckQueue: A lightweight, agnostic job queue backed by DuckDB.
+Queuack: A lightweight, agnostic job queue backed by DuckDB.
 
-Unlike Celery/RQ which require Redis/RabbitMQ, DuckQueue uses a single
+Unlike Celery/RQ which require Redis/RabbitMQ, Queuack uses a single
 DuckDB file for persistence. Perfect for:
 - Single-machine deployments
 - Dev/test environments
@@ -20,7 +20,7 @@ Key features:
 - No external dependencies (just DuckDB)
 
 Example:
-    from duckqueue import DuckQueue
+    from queuack import DuckQueue
     
     # Producer
     queue = DuckQueue("jobs.duckdb")
@@ -38,98 +38,21 @@ import duckdb
 import pickle
 import uuid
 import time
+import threading
 import traceback
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass
 from enum import Enum
 import logging
 
+from .dag_context import DAGContext
+from .data_models import Job
+from .status import JobStatus
+from .exceptions import BackpressureError
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-# ============================================================================
-# Data Models
-# ============================================================================
-
-class JobStatus(Enum):
-    """Job lifecycle states."""
-    PENDING = "pending"      # Waiting to be claimed
-    CLAIMED = "claimed"      # Worker has claimed it
-    DONE = "done"           # Successfully completed
-    FAILED = "failed"       # Failed after max retries
-    DELAYED = "delayed"     # Scheduled for future execution
-
-
-class BackpressureError(Exception):
-    """Raised when queue depth exceeds safe limits."""
-    pass
-
-
-@dataclass
-class Job:
-    """
-    Represents a serialized function call to be executed.
-    
-    Attributes:
-        id: Unique job identifier
-        func: Function to execute (serialized)
-        args: Positional arguments
-        kwargs: Keyword arguments
-        queue: Queue name for routing
-        status: Current job status
-        priority: Higher = executed first (0-100)
-        created_at: Job creation timestamp
-        execute_after: Delay execution until this time
-        claimed_at: When worker claimed the job
-        claimed_by: Worker ID that claimed it
-        completed_at: When job finished
-        attempts: Number of execution attempts
-        max_attempts: Maximum retry attempts
-        timeout_seconds: Max execution time
-        result: Serialized result (if successful)
-        error: Error message (if failed)
-    """
-    id: str
-    func: bytes  # Pickled function
-    args: bytes  # Pickled args tuple
-    kwargs: bytes  # Pickled kwargs dict
-    queue: str
-    status: str
-    priority: int = 50
-    created_at: datetime = None
-    execute_after: datetime = None
-    claimed_at: Optional[datetime] = None
-    claimed_by: Optional[str] = None
-    completed_at: Optional[datetime] = None
-    attempts: int = 0
-    max_attempts: int = 3
-    timeout_seconds: int = 300
-    result: Optional[bytes] = None
-    error: Optional[str] = None
-    
-    def __post_init__(self):
-        if self.created_at is None:
-            self.created_at = datetime.now()
-    
-    def execute(self) -> Any:
-        """
-        Execute the job (unpickle function and call it).
-        
-        Returns:
-            Function result
-        
-        Raises:
-            Any exception from the function
-        """
-        func = pickle.loads(self.func)
-        args = pickle.loads(self.args)
-        kwargs = pickle.loads(self.kwargs)
-        
-        logger.info(f"Executing {func.__name__}(*{args}, **{kwargs})")
-        
-        return func(*args, **kwargs)
 
 
 # ============================================================================
@@ -143,29 +66,139 @@ class DuckQueue:
     Thread-safe within single process (DuckDB handles locking).
     Multi-process safe with file-based coordination.
     """
-    
+
     def __init__(
         self,
         db_path: str = "duckqueue.db",
-        default_queue: str = "default"
+        default_queue: str = "default",
+        workers_num: int = None,
+        worker_concurrency: int = 1,
+        poll_timeout: float = 1.0
     ):
-        """
-        Initialize queue.
-        
-        Args:
-            db_path: Path to DuckDB file (use ":memory:" for ephemeral)
-            default_queue: Default queue name if not specified
-        """
+        """Initialize queue with schema creation."""
+        if workers_num is not None and workers_num <= 0:
+            raise ValueError("workers_num must be positive or None")
+        if worker_concurrency <= 0:
+            raise ValueError("worker_concurrency must be positive")
+
         self.db_path = db_path
         self.default_queue = default_queue
-        self.conn = duckdb.connect(db_path)
+        self._workers_num = workers_num
+        self._worker_concurrency = worker_concurrency
+        self._poll_timeout = poll_timeout
+
+        # Create connection pool
+        self._conn_pool = ConnectionPool(self.db_path)
+
+        # Initialize database schema
         self._init_schema()
+        
+        self._db_lock = threading.RLock()
+        self._worker_pool = None
+        self._closed = False
+
+    # Backpressure thresholds are configurable via classmethods so tests
+    # or subclasses can override them for faster runs.
+    @classmethod
+    def backpressure_warning_threshold(cls) -> int:
+        """Return the number of pending jobs at which we issue a warning.
+
+        Default: 1000
+        """
+        return 1000
+
+    @classmethod
+    def backpressure_block_threshold(cls) -> int:
+        """Return the number of pending jobs at which we block/enforce backpressure.
+
+        Default: 10000
+        """
+        return 10000
+
+    @property
+    def conn(self):
+        """Get thread-local connection."""
+        return self._conn_pool.get_connection()
+
+    def __enter__(self):
+        """Context manager entry - start workers if configured."""
+        if self._workers_num is not None:
+            self.start_workers(
+                num_workers=self._workers_num, 
+                concurrency=self._worker_concurrency,
+                daemon=True
+            )
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+    
+    def start_workers(
+        self, 
+        num_workers: int = 4, 
+        concurrency: int = 1,
+        daemon: bool = True
+    ):
+        """Start background workers that process jobs automatically."""
+        self._worker_pool = WorkerPool(self, num_workers, concurrency)
+        self._worker_pool.start()
+        
+        if not daemon:
+            # Block and wait for workers
+            try:
+                while True:
+                    time.sleep(self._poll_timeout)
+            except KeyboardInterrupt:
+                self._worker_pool.stop()
+    
+    def stop_workers(self):
+        """Stop background workers."""
+        if self._worker_pool is not None:
+            self._worker_pool.stop()
+            self._worker_pool = None
     
     def _init_schema(self):
-        """Create jobs table and indexes."""
-        self.conn.execute("""
+        """Initialize database schema.
+        
+        For :memory: databases, create ONE connection before marking ready, 
+        and share it via the connection pool. This ensuresall threads see 
+        the same schema and data.
+        """
+        # Block all connections until schema is ready
+        self._conn_pool.mark_initializing()
+        
+        try:
+            init_conn = duckdb.connect(self.db_path)
+
+            # For :memory:, create the shared connection here
+            if self._conn_pool._use_shared_memory:
+                # Create schema on this connection
+                self._create_schema(init_conn)
+                
+                # Store as the global shared connection BEFORE marking ready
+                # This ensures get_connection() will return this exact connection
+                self._conn_pool.set_global_connection(init_conn)
+            
+            # For file DBs, create a temporary connection just for schema init
+            else:
+                try:
+                    self._create_schema(init_conn)
+                finally:
+                    # Close the init connection - threads will create their own
+                    init_conn.close()
+        finally:
+            # Now it's safe for threads to get connections
+            self._conn_pool.mark_ready()
+
+    def _create_schema(self, conn):
+        """Create database schema on the given connection."""
+        # Use CREATE IF NOT EXISTS for idempotency
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id VARCHAR PRIMARY KEY,
+                dag_run_id VARCHAR,
+                node_name VARCHAR,
+                dependency_mode VARCHAR DEFAULT 'all',
                 func BLOB NOT NULL,
                 args BLOB NOT NULL,
                 kwargs BLOB NOT NULL,
@@ -181,22 +214,83 @@ class DuckQueue:
                 max_attempts INTEGER DEFAULT 3,
                 timeout_seconds INTEGER DEFAULT 300,
                 result BLOB,
-                error TEXT
+                error TEXT,
+                skipped_at TIMESTAMP,
+                skip_reason TEXT,
+                skipped_by VARCHAR
             )
         """)
         
-        # Optimize claim queries
-        self.conn.execute("""
+        conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_jobs_claim 
             ON jobs(queue, status, priority DESC, execute_after, created_at)
         """)
         
-        # Dead letter queue view
-        self.conn.execute("""
+        conn.execute("""
             CREATE VIEW IF NOT EXISTS dead_letter_queue AS
             SELECT * FROM jobs 
             WHERE status = 'failed' AND attempts >= max_attempts
         """)
+
+        # Dependency table for DAG support (Phase 1)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS job_dependencies (
+                child_job_id VARCHAR NOT NULL,
+                parent_job_id VARCHAR NOT NULL,
+                PRIMARY KEY (child_job_id, parent_job_id)
+            )
+        """)
+
+        # DAG runs table
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dag_runs (
+                id VARCHAR PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP NOT NULL,
+                completed_at TIMESTAMP,
+                status VARCHAR NOT NULL,
+                metadata JSON
+            )
+            """
+        )
+        
+        # Indexes for DAG queries
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dag_runs_name ON dag_runs(name)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_dag_runs_status ON dag_runs(status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_dag_run ON jobs(dag_run_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_node_name ON jobs(node_name)"
+        )
+        
+        # Statistics view
+        conn.execute(
+            """
+            CREATE OR REPLACE VIEW dag_run_stats AS
+            SELECT 
+                dr.id as dag_run_id,
+                dr.name as dag_name,
+                dr.status as dag_status,
+                dr.created_at,
+                dr.completed_at,
+                COUNT(j.id) as total_jobs,
+                SUM(CASE WHEN j.status = 'done' THEN 1 ELSE 0 END) as completed_jobs,
+                SUM(CASE WHEN j.status = 'failed' THEN 1 ELSE 0 END) as failed_jobs,
+                SUM(CASE WHEN j.status = 'pending' THEN 1 ELSE 0 END) as pending_jobs,
+                SUM(CASE WHEN j.status = 'claimed' THEN 1 ELSE 0 END) as running_jobs,
+                SUM(CASE WHEN j.status = 'skipped' THEN 1 ELSE 0 END) as skipped_jobs
+            FROM dag_runs dr
+            LEFT JOIN jobs j ON dr.id = j.dag_run_id
+            GROUP BY dr.id, dr.name, dr.status, dr.created_at, dr.completed_at
+        """
+    )
     
     # ========================================================================
     # Enqueue (Producer API)
@@ -212,7 +306,9 @@ class DuckQueue:
         delay_seconds: int = 0,
         max_attempts: int = 3,
         timeout_seconds: int = 300,
-        check_backpressure: bool = True
+        check_backpressure: bool = True,
+        depends_on: Union[str, List[str]] = None,
+        dependency_mode: str = 'all'
     ) -> str:
         """
         Enqueue a function call for async execution.
@@ -227,6 +323,7 @@ class DuckQueue:
             max_attempts: Max retry attempts on failure
             timeout_seconds: Max execution time
             check_backpressure: If True, raise error if queue too full
+            dependency_mode: 'all' or 'any' - how to handle multiple parent dependencies
         
         Returns:
             Job ID (UUID)
@@ -254,16 +351,21 @@ class DuckQueue:
             stats = self.stats(queue)
             pending = stats.get('pending', 0) + stats.get('delayed', 0)
             
-            # Default: Warn at 1000, block at 10000
-            # Note: we check >= 1000 so the warning fires when attempting to enqueue the 1001st job.
-            if pending > 10000:
+            # Configurable thresholds (defaults: warn=1000, block=10000)
+            warn_threshold = self.backpressure_warning_threshold()
+            block_threshold = self.backpressure_block_threshold()
+
+            # Note: we check >= warn_threshold so the warning fires when attempting to enqueue the
+            # (warn_threshold+1)th job.
+            if pending > block_threshold:
                 raise BackpressureError(
-                    f"Queue '{queue}' has {pending} pending jobs (limit: 10000). "
+                    f"Queue '{queue}' has {pending} pending jobs (limit: {block_threshold}). "
                     "System is overloaded. Scale workers or reduce enqueue rate."
                 )
-            elif pending >= 1000:
+            # Warn when the new job would push us past the warning threshold.
+            elif (pending + 1) > warn_threshold:
                 import warnings
-                
+
                 msg=f"Queue '{queue}' has {pending} pending jobs (approaching limit)"
                 logger.warning(msg)
                 warnings.warn(msg, UserWarning)
@@ -278,24 +380,39 @@ class DuckQueue:
         now = datetime.now()
         execute_after = now + timedelta(seconds=delay_seconds) if delay_seconds > 0 else now
         
-        self.conn.execute("""
-            INSERT INTO jobs (
-                id, func, args, kwargs, queue, status, priority,
-                created_at, execute_after, max_attempts, timeout_seconds
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, [
-            job_id,
-            pickled_func,
-            pickle.dumps(args),
-            pickle.dumps(kwargs),
-            queue,
-            JobStatus.DELAYED.value if delay_seconds > 0 else JobStatus.PENDING.value,
-            priority,
-            now,
-            execute_after,
-            max_attempts,
-            timeout_seconds
-        ])
+        with self._db_lock:
+            self.conn.execute("""
+                INSERT INTO jobs (
+                    id, func, args, kwargs, queue, status, priority,
+                    created_at, execute_after, max_attempts, timeout_seconds, dependency_mode
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                job_id,
+                pickled_func,
+                pickle.dumps(args),
+                pickle.dumps(kwargs),
+                queue,
+                JobStatus.DELAYED.value if delay_seconds > 0 else JobStatus.PENDING.value,
+                priority,
+                now,
+                execute_after,
+                max_attempts,
+                timeout_seconds,
+                dependency_mode
+            ])
+
+            # Persist dependencies if provided
+            if depends_on:
+                parent_ids = [depends_on] if isinstance(depends_on, str) else list(depends_on)
+                for pid in parent_ids:
+                    try:
+                        self.conn.execute(
+                            "INSERT INTO job_dependencies (child_job_id, parent_job_id) VALUES (?, ?)",
+                            [job_id, pid]
+                        )
+                    except Exception:
+                        # ignore duplicate/missing parent handling here; validation may be added later
+                        pass
         
         logger.info(f"Enqueued {func.__name__} as {job_id[:8]} on queue '{queue}'")
         
@@ -351,14 +468,19 @@ class DuckQueue:
                 300   # timeout_seconds
             ])
         
-        self.conn.executemany("""
-            INSERT INTO jobs (
-                id, func, args, kwargs, queue, status, priority,
-                created_at, execute_after, max_attempts, timeout_seconds
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, rows)
-        
-        logger.info(f"Batch enqueued {len(job_ids)} jobs on queue '{queue}'")
+        with self._db_lock:
+            # Handle empty batch case
+            if not rows:
+                return []
+
+            self.conn.executemany("""
+                INSERT INTO jobs (
+                    id, func, args, kwargs, queue, status, priority,
+                    created_at, execute_after, max_attempts, timeout_seconds
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, rows)
+            
+            logger.info(f"Batch enqueued {len(job_ids)} jobs on queue '{queue}'")
         
         return job_ids
     
@@ -396,56 +518,83 @@ class DuckQueue:
         worker_id = worker_id or self._generate_worker_id()
         now = datetime.now()
         
-        # Promote delayed jobs that are ready
-        self.conn.execute("""
-            UPDATE jobs
-            SET status = 'pending'
-            WHERE status = 'delayed'
-              AND execute_after <= ?
-        """, [now])
-        
-        # Atomic claim with stale job recovery
-        result = self.conn.execute("""
-            UPDATE jobs
-            SET 
-                status = 'claimed',
-                claimed_at = ?,
-                claimed_by = ?,
-                attempts = attempts + 1
-            WHERE id = (
-                SELECT id FROM jobs
-                WHERE queue = ?
-                AND (
-                    status = 'pending'
-                    OR (
-                        status = 'claimed' 
-                        AND claimed_at < ?
+        with self._db_lock:
+            # Promote delayed jobs that are ready
+            self.conn.execute("""
+                UPDATE jobs
+                SET status = 'pending'
+                WHERE status = 'delayed'
+                AND execute_after <= ?
+            """, [now])
+            
+            # Atomic claim with stale job recovery
+            # Only claim a job if its dependencies are satisfied based on dependency_mode:
+            # - 'all': ALL parents must be 'done'
+            # - 'any': AT LEAST ONE parent must be 'done'
+            result = self.conn.execute("""
+                UPDATE jobs
+                SET 
+                    status = 'claimed',
+                    claimed_at = ?,
+                    claimed_by = ?,
+                    attempts = attempts + 1
+                WHERE id = (
+                    SELECT j.id FROM jobs AS j
+                    WHERE j.queue = ?
+                    AND (
+                        j.status = 'pending'
+                        OR (
+                            j.status = 'claimed' 
+                            AND j.claimed_at < ?
+                        )
                     )
+                    AND j.attempts < j.max_attempts
+                    AND (j.execute_after IS NULL OR j.execute_after <= ?)
+                    AND (
+                        -- No dependencies: always ready
+                        NOT EXISTS (
+                            SELECT 1 FROM job_dependencies jd
+                            WHERE jd.child_job_id = j.id
+                        )
+                        OR
+                        -- Mode 'all': ALL parents must be done
+                        (j.dependency_mode = 'all' AND NOT EXISTS (
+                            SELECT 1 FROM job_dependencies jd
+                            JOIN jobs pj ON jd.parent_job_id = pj.id
+                            WHERE jd.child_job_id = j.id
+                            AND pj.status != 'done'
+                        ))
+                        OR
+                        -- Mode 'any': AT LEAST ONE parent must be done
+                        (j.dependency_mode = 'any' AND EXISTS (
+                            SELECT 1 FROM job_dependencies jd
+                            JOIN jobs pj ON jd.parent_job_id = pj.id
+                            WHERE jd.child_job_id = j.id
+                            AND pj.status = 'done'
+                        ))
+                    )
+                    ORDER BY j.priority DESC, j.created_at ASC
+                    LIMIT 1
                 )
-                AND attempts < max_attempts
-                AND (execute_after IS NULL OR execute_after <= ?)
-                ORDER BY priority DESC, created_at ASC
-                LIMIT 1
-            )
-            RETURNING *
-        """, [
-            now,
-            worker_id,
-            queue,
-            now - timedelta(seconds=claim_timeout),
-            now
-        ]).fetchone()
-        
-        if result is None:
-            return None
-        
-        # Convert to Job object
-        columns = [desc[0] for desc in self.conn.description]
-        job_dict = dict(zip(columns, result))
-        
-        logger.info(f"Claimed job {job_dict['id'][:8]} by {worker_id}")
-        
-        return Job(**job_dict)
+                RETURNING *
+            """, [
+                now,
+                worker_id,
+                queue,
+                now - timedelta(seconds=claim_timeout),
+                now
+            ]).fetchone()
+            
+            if result is None:
+                return None
+            
+            # Convert to Job object
+            columns = [desc[0] for desc in self.conn.description]
+            job_dict = dict(zip(columns, result))
+            
+            logger.info(f"Claimed job {job_dict['id'][:8]} by {worker_id}")
+            
+            return Job(**job_dict)
     
     def ack(
         self,
@@ -466,48 +615,102 @@ class DuckQueue:
         """
         now = datetime.now()
         
-        if error:
-            # Failed - check if should retry
-            job = self.conn.execute("""
-                SELECT attempts, max_attempts FROM jobs WHERE id = ?
-            """, [job_id]).fetchone()
-            
-            if job and job[0] < job[1]:
-                # Retry: move back to pending
-                self.conn.execute("""
-                    UPDATE jobs
-                    SET 
-                        status = 'pending',
-                        error = ?,
-                        claimed_at = NULL,
-                        claimed_by = NULL
-                    WHERE id = ?
-                """, [error, job_id])
-                logger.info(f"Job {job_id[:8]} failed (attempt {job[0]}/{job[1]}), requeued")
+        with self._db_lock:
+            if error:
+                # Failed - check if should retry
+                job = self.conn.execute("""
+                    SELECT attempts, max_attempts FROM jobs WHERE id = ?
+                """, [job_id]).fetchone()
+                
+                if job and job[0] < job[1]:
+                    # Retry: move back to pending
+                    self.conn.execute("""
+                        UPDATE jobs
+                        SET 
+                            status = 'pending',
+                            error = ?,
+                            claimed_at = NULL,
+                            claimed_by = NULL
+                        WHERE id = ?
+                    """, [error, job_id])
+                    logger.info(f"Job {job_id[:8]} failed (attempt {job[0]}/{job[1]}), requeued")
+                else:
+                    # Max attempts reached: move to failed
+                    self.conn.execute("""
+                        UPDATE jobs
+                        SET 
+                            status = 'failed',
+                            completed_at = ?,
+                            error = ?
+                        WHERE id = ?
+                    """, [now, error, job_id])
+                    logger.error(f"Job {job_id[:8]} failed permanently: {error}")
+
+                    # Propagate permanent failure to descendants: mark them SKIPPED.
+                    # Only mark SKIPPED when dependency_mode makes the job unrunnable.
+                    try:
+                        # Find all descendants and their dependency modes
+                        self.conn.execute("""
+                            WITH RECURSIVE descendants(child_id) AS (
+                                SELECT child_job_id FROM job_dependencies WHERE parent_job_id = ?
+                                UNION ALL
+                                SELECT jd.child_job_id FROM job_dependencies jd
+                                JOIN descendants d ON jd.parent_job_id = d.child_id
+                            )
+                            UPDATE jobs
+                            SET
+                                status = 'skipped',
+                                skipped_at = ?,
+                                skip_reason = ?,
+                                skipped_by = ?,
+                                attempts = max_attempts,
+                                completed_at = ?
+                            WHERE id IN (
+                                SELECT j.id FROM jobs j
+                                WHERE j.id IN (SELECT child_id FROM descendants)
+                                AND j.status NOT IN ('done', 'failed', 'skipped')
+                                AND (
+                                    -- Mode 'all': Any parent failed/skipped means unrunnable
+                                    (j.dependency_mode = 'all' AND EXISTS (
+                                        SELECT 1 FROM job_dependencies jd
+                                        JOIN jobs pj ON jd.parent_job_id = pj.id
+                                        WHERE jd.child_job_id = j.id
+                                        AND pj.status IN ('failed', 'skipped')
+                                    ))
+                                    OR
+                                    -- Mode 'any': ALL parents failed/skipped means unrunnable
+                                    (j.dependency_mode = 'any' AND NOT EXISTS (
+                                        SELECT 1 FROM job_dependencies jd
+                                        JOIN jobs pj ON jd.parent_job_id = pj.id
+                                        WHERE jd.child_job_id = j.id
+                                        AND pj.status NOT IN ('failed', 'skipped')
+                                    ) AND EXISTS (
+                                        -- Has at least one dependency
+                                        SELECT 1 FROM job_dependencies jd
+                                        WHERE jd.child_job_id = j.id
+                                    ))
+                                )
+                            )
+                            AND status NOT IN ('done', 'failed', 'skipped')
+                        """, [job_id, now, f"parent_failed:{job_id}", 'queuack', now])
+
+                        logger.info(f"Marked descendants of {job_id[:8]} as SKIPPED")
+                    except Exception as e:
+                        # Failures here should not block ack, but log them for operators.
+                        logger.exception(f"Error propagating skipped state for {job_id[:8]}: {e}")
             else:
-                # Max attempts reached: move to failed
+                # Success
+                result_bytes = pickle.dumps(result) if result is not None else None
+                
                 self.conn.execute("""
                     UPDATE jobs
                     SET 
-                        status = 'failed',
+                        status = 'done',
                         completed_at = ?,
-                        error = ?
+                        result = ?
                     WHERE id = ?
-                """, [now, error, job_id])
-                logger.error(f"Job {job_id[:8]} failed permanently: {error}")
-        else:
-            # Success
-            result_bytes = pickle.dumps(result) if result is not None else None
-            
-            self.conn.execute("""
-                UPDATE jobs
-                SET 
-                    status = 'done',
-                    completed_at = ?,
-                    result = ?
-                WHERE id = ?
-            """, [now, result_bytes, job_id])
-            logger.info(f"Job {job_id[:8]} completed successfully")
+                """, [now, result_bytes, job_id])
+                logger.info(f"Job {job_id[:8]} completed successfully")
     
     def nack(self, job_id: str, requeue: bool = True):
         """
@@ -517,18 +720,19 @@ class DuckQueue:
             job_id: Job ID
             requeue: If True, move back to pending (default)
         """
-        if requeue:
-            self.conn.execute("""
-                UPDATE jobs
-                SET 
-                    status = 'pending',
-                    claimed_at = NULL,
-                    claimed_by = NULL
-                WHERE id = ?
-            """, [job_id])
-            logger.info(f"Job {job_id[:8]} requeued")
-        else:
-            self.ack(job_id, error="Negative acknowledged without requeue")
+        with self._db_lock:
+            if requeue:
+                self.conn.execute("""
+                    UPDATE jobs
+                    SET 
+                        status = 'pending',
+                        claimed_at = NULL,
+                        claimed_by = NULL
+                    WHERE id = ?
+                """, [job_id])
+                logger.info(f"Job {job_id[:8]} requeued")
+            else:
+                self.ack(job_id, error="Negative acknowledged without requeue")
     
     # ========================================================================
     # Monitoring & Introspection
@@ -541,29 +745,34 @@ class DuckQueue:
         Returns:
             Dict with counts by status
         """
+        if self._closed:
+            raise Exception("Queue closed")
+
         queue = queue or self.default_queue
-        
-        result = self.conn.execute("""
-            SELECT status, COUNT(*) as count
-            FROM jobs
-            WHERE queue = ?
-            GROUP BY status
-        """, [queue]).fetchall()
-        
-        stats = {row[0]: row[1] for row in result}
-        stats.setdefault('pending', 0)
-        stats.setdefault('claimed', 0)
-        stats.setdefault('done', 0)
-        stats.setdefault('failed', 0)
-        stats.setdefault('delayed', 0)
-        
-        return stats
+
+        with self._db_lock:
+            result = self.conn.execute("""
+                SELECT status, COUNT(*) as count
+                FROM jobs
+                WHERE queue = ?
+                GROUP BY status
+            """, [queue]).fetchall()
+            
+            stats = {row[0]: row[1] for row in result}
+            stats.setdefault('pending', 0)
+            stats.setdefault('claimed', 0)
+            stats.setdefault('done', 0)
+            stats.setdefault('failed', 0)
+            stats.setdefault('delayed', 0)
+            
+            return stats
     
     def get_job(self, job_id: str) -> Optional[Job]:
         """Get job by ID."""
-        result = self.conn.execute("""
-            SELECT * FROM jobs WHERE id = ?
-        """, [job_id]).fetchone()
+        with self._db_lock:
+            result = self.conn.execute("""
+                SELECT * FROM jobs WHERE id = ?
+            """, [job_id]).fetchone()
         
         if result is None:
             return None
@@ -628,34 +837,35 @@ class DuckQueue:
         """
         cutoff = datetime.now() - timedelta(hours=older_than_hours)
         
-        if queue:
-            # Count first, then delete
-            count_result = self.conn.execute("""
-                SELECT COUNT(*) FROM jobs
-                WHERE queue = ? AND status = ? AND created_at < ?
-            """, [queue, status, cutoff]).fetchone()
-            
-            count = count_result[0] if count_result else 0
-            
-            if count > 0:
-                self.conn.execute("""
-                    DELETE FROM jobs
+        with self._db_lock:
+            if queue:
+                # Count first, then delete
+                count_result = self.conn.execute("""
+                    SELECT COUNT(*) FROM jobs
                     WHERE queue = ? AND status = ? AND created_at < ?
-                """, [queue, status, cutoff])
-        else:
-            # Count first, then delete
-            count_result = self.conn.execute("""
-                SELECT COUNT(*) FROM jobs
-                WHERE status = ? AND created_at < ?
-            """, [status, cutoff]).fetchone()
-            
-            count = count_result[0] if count_result else 0
-            
-            if count > 0:
-                self.conn.execute("""
-                    DELETE FROM jobs
+                """, [queue, status, cutoff]).fetchone()
+                
+                count = count_result[0] if count_result else 0
+                
+                if count > 0:
+                    self.conn.execute("""
+                        DELETE FROM jobs
+                        WHERE queue = ? AND status = ? AND created_at < ?
+                    """, [queue, status, cutoff])
+            else:
+                # Count first, then delete
+                count_result = self.conn.execute("""
+                    SELECT COUNT(*) FROM jobs
                     WHERE status = ? AND created_at < ?
-                """, [status, cutoff])
+                """, [status, cutoff]).fetchone()
+                
+                count = count_result[0] if count_result else 0
+                
+                if count > 0:
+                    self.conn.execute("""
+                        DELETE FROM jobs
+                        WHERE status = ? AND created_at < ?
+                    """, [status, cutoff])
         
         logger.info(f"Purged {count} {status} jobs older than {older_than_hours}h")
         
@@ -672,8 +882,49 @@ class DuckQueue:
         return f"{socket.gethostname()}-{os.getpid()}-{int(time.time())}"
     
     def close(self):
-        """Close database connection."""
-        self.conn.close()
+        """Close database connections and stop workers."""
+        # Stop workers first if they exist
+        if self._worker_pool is not None:
+            self.stop_workers()
+        # Close the current thread's connection
+        self._conn_pool.close_current()
+        self._closed = True
+    
+    def dag(
+        self,
+        name: str,
+        description: str = None,
+        validate: bool = True,
+        fail_fast: bool = True
+    ) -> DAGContext:
+        """
+        Create a DAG context manager.
+        
+        Args:
+            name: DAG name
+            description: Optional description
+            validate: Validate DAG before submission
+            fail_fast: Raise immediately on validation errors
+        
+        Returns:
+            DAGContext manager
+        
+        Example:
+            with queue.dag("etl") as dag:
+                extract = dag.enqueue(extract_data, name="extract")
+                transform = dag.enqueue(
+                    transform_data,
+                    depends_on="extract",
+                    name="transform"
+                )
+        """
+        return DAGContext(
+            self,
+            name,
+            description=description,
+            validate_on_exit=validate,
+            fail_fast=fail_fast
+        )
 
 
 # ============================================================================
@@ -857,6 +1108,152 @@ class Worker:
             self.queue.ack(job.id, error=error_msg)
             
             logger.error(f"✗ [{self.worker_id}] Job {job.id[:8]} failed: {e}")
+
+class ConnectionPool:
+    """Thread-safe connection pool for DuckDB.
+
+    Manages thread-local connections. Supports a single shared connection
+    when using an in-memory database path (":memory:") because separate
+    connections to ":memory:" do not share schema/data.
+    """
+
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self._local = threading.local()
+
+        # Detect in-memory DB usage
+        self._use_shared_memory = (self.db_path == ":memory:")
+        
+        # For :memory:, we'll create the connection during schema init
+        # and store it here. For file DBs, this stays None.
+        self._global_conn: Optional[duckdb.DuckDBPyConnection] = None
+
+        # Global lock to prevent connections during schema init
+        self._ready = threading.Event()
+        self._ready.set()  # Will be cleared during schema init
+
+    def wait_until_ready(self):
+        """Block until the database is ready (schema initialized)."""
+        self._ready.wait()
+
+    def mark_initializing(self):
+        """Mark database as initializing (blocks new connections)."""
+        self._ready.clear()
+
+    def mark_ready(self):
+        """Mark database as ready (allows new connections)."""
+        self._ready.set()
+
+    def get_connection(self) -> duckdb.DuckDBPyConnection:
+        """Get or create a thread-local connection.
+
+        If using a shared in-memory DB (':memory:'), return the single
+        global connection so schema/data are visible to everyone.
+        
+        CRITICAL FIX: For :memory:, _global_conn is created during schema
+        initialization and must exist before this is called.
+        """
+        # Wait until schema is initialized
+        self._ready.wait()
+
+        if self._use_shared_memory:
+            # Return the pre-created shared connection
+            # This must have been set during _init_schema()
+            if self._global_conn is None:
+                raise RuntimeError(
+                    "Internal error: shared memory connection not initialized. "
+                    "This should have been created during schema initialization."
+                )
+            return self._global_conn
+
+        # Otherwise, use a thread-local connection (file-backed DB case)
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            self._local.conn = duckdb.connect(self.db_path)
+        return self._local.conn
+
+    def set_global_connection(self, conn: duckdb.DuckDBPyConnection):
+        """Set the global shared connection (used for :memory: during init).
+        
+        This should only be called once during schema initialization.
+        """
+        if not self._use_shared_memory:
+            raise RuntimeError("set_global_connection should only be used for :memory: databases")
+        
+        if self._global_conn is not None:
+            raise RuntimeError("Global connection already set")
+        
+        self._global_conn = conn
+
+    def close_current(self):
+        """Close the current thread's connection or the global shared one."""
+        try:
+            if self._use_shared_memory:
+                if self._global_conn is not None:
+                    try:
+                        self._global_conn.close()
+                    except:
+                        pass
+                    self._global_conn = None
+            else:
+                if hasattr(self._local, 'conn') and self._local.conn is not None:
+                    try:
+                        self._local.conn.close()
+                    except:
+                        pass
+                    self._local.conn = None
+        except Exception:
+            # be defensive — closing shouldn't raise to caller
+            pass
+
+class WorkerPool:
+    def __init__(self, queue: DuckQueue, num_workers: int = 4, concurrency: int = 1):
+        self.queue = queue
+        self.num_workers = num_workers
+        self.concurrency = concurrency
+        self.workers = []
+        self.threads = []
+        self.running = False
+    
+    def start(self):
+        """Start workers in background threads."""
+        self.running = True
+        
+        for i in range(self.num_workers):
+            worker = Worker(
+                self.queue, 
+                worker_id=f"worker-{i}",
+                concurrency=self.concurrency
+            )
+            self.workers.append(worker)
+            
+            thread = threading.Thread(
+                target=worker.run,
+                args=(1.0,),  # poll_interval
+                daemon=True,  # Dies when main thread exits
+                name=f"WorkerThread-{i}"
+            )
+            thread.start()
+            self.threads.append(thread)
+        
+        logger.info(f"WorkerPool started with {self.num_workers} workers")
+    
+    def stop(self, timeout: int = 30):
+        """Gracefully stop all workers."""
+        for worker in self.workers:
+            worker.should_stop = True
+        
+        for thread in self.threads:
+            thread.join(timeout=timeout)
+        
+        logger.info("WorkerPool stopped")
+    
+    def __enter__(self):
+        self.start()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
 
 
 # ============================================================================
