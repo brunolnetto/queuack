@@ -6,12 +6,14 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "duckdb>=1.4.1",
+    "networkx>=3.2.1",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
+    "pytest-watch>=4.2.0",
     "ruff>=0.14.1",
 ]
 
@@ -20,13 +22,9 @@ include = ["queuack"]
 exclude = ["images"]
 
 [tool.tox]
-envlist = ["py39"]
+envlist = ["py311"]
 
-[tool.tox.testenv.py39]
-deps = [
-    "pytest",
-    "pytest-cov",
-]
-commands = [
-    "pytest --cov=queuack",
-]
+[tool.tox.env.py311]
+deps = ["pytest", "pytest-cov"]
+commands = [["pytest", "--cov=queuack"]]
+

@@ -37,7 +37,7 @@ SPHINXBUILD   = python3 -msphinx
 PACKAGE_NAME = "queuack"
 PACKAGE_VERSION := $(shell python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
 
-COVERAGE_IGNORE_PATHS = "eule/examples"
+COVERAGE_IGNORE_PATHS = "queuack/examples"
 
 help:
 	@python -c "$$PRINT_HELP_PYSCRIPT" < $(MAKEFILE_LIST)
