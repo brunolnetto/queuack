@@ -1,5 +1,5 @@
 """
-Comprehensive tests for Phase 2 DAG Context Manager.
+Comprehensive tests for DAG Context Manager.
 
 Tests cover:
 - Basic DAG context usage

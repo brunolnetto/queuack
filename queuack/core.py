@@ -43,7 +43,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import duckdb
 
-from .dag_context import DAGContext
+from .dag import DAGContext
 from .data_models import BackpressureError, Job
 from .status import JobStatus
 
@@ -629,19 +629,19 @@ For more complex cases, consider using JSON-serializable function references.
         count: int = 10,
         queue: str = None,
         worker_id: str = None,
-        claim_timeout: int = 300
+        claim_timeout: int = 300,
     ) -> List[Job]:
         """
         Atomically claim multiple jobs at once.
-        
+
         This is 10-100x faster than claiming one at a time.
-        
+
         Args:
             count: Number of jobs to claim
             queue: Queue name
             worker_id: Worker identifier
             claim_timeout: Stale job recovery timeout
-        
+
         Returns:
             List of claimed Job objects
         """
@@ -651,15 +651,19 @@ For more complex cases, consider using JSON-serializable function references.
 
         with self._db_lock:
             # Promote delayed jobs
-            self.conn.execute("""
+            self.conn.execute(
+                """
                 UPDATE jobs
                 SET status = 'pending'
                 WHERE status = 'delayed'
                 AND execute_after <= ?
-            """, [now])
+            """,
+                [now],
+            )
 
             # Claim multiple jobs in ONE transaction
-            results = self.conn.execute("""
+            results = self.conn.execute(
+                """
                 WITH claimable AS (
                     SELECT j.id
                     FROM jobs AS j
@@ -704,14 +708,16 @@ For more complex cases, consider using JSON-serializable function references.
                     attempts = attempts + 1
                 WHERE id IN (SELECT id FROM claimable)
                 RETURNING *
-            """, [
-                queue,
-                now - timedelta(seconds=claim_timeout),
-                now,
-                count,
-                now,
-                worker_id
-            ]).fetchall()
+            """,
+                [
+                    queue,
+                    now - timedelta(seconds=claim_timeout),
+                    now,
+                    count,
+                    now,
+                    worker_id,
+                ],
+            ).fetchall()
 
             if not results:
                 return []
