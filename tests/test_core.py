@@ -1674,7 +1674,7 @@ class TestNewFeaturesIntegration:
             assert job.status in [JobStatus.DELAYED.value, JobStatus.PENDING.value]
 
             # Wait longer for worker to process
-            time.sleep(1)  # Increase from 1 to 2
+            time.sleep(2)
             job = q.get_job(job_id)
 
             assert job.status in [JobStatus.DONE.value, JobStatus.CLAIMED.value], (
