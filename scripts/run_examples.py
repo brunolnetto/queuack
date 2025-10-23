@@ -444,7 +444,24 @@ def demo(ctx, delay):
 
     # Auto-select demos: first example from each category
     demos = []
-    for cat in sorted(registry.get_categories()):
+    
+    # Desired category order for listing
+    desired_order = [
+        "basic",
+        "workers",
+        "dag_workflows",
+        "real_world",
+        "advanced",
+        "integration",
+    ]
+
+    def sort_key(cat):
+        try:
+            return desired_order.index(cat)
+        except ValueError:
+            return len(desired_order)  # Unknown categories at the end
+
+    for cat in sorted(registry.get_categories(), key=sort_key):
         examples = registry.list_by_category().get(cat, [])
         if examples:
             first = sorted(examples, key=lambda x: x.path.name)[0]
@@ -455,7 +472,8 @@ def demo(ctx, delay):
         return
 
     click.echo("🎬 Starting Queuack Demo Tour")
-    click.echo(f"Running {len(demos)} examples with {delay}s between each\n")
+    click.echo(f"Running {len(demos)} examples with {delay}s between each")
+    click.echo("You can skip individual demos or cancel the entire tour\n")
 
     for i, demo_key in enumerate(demos, 1):
         example = registry.get(demo_key)
@@ -464,18 +482,29 @@ def demo(ctx, delay):
 
         click.echo(f"\n{'=' * 60}")
         click.echo(f"Demo {i}/{len(demos)}: {example.name}")
+        click.echo(f"Category: {example.category.replace('_', ' ').title()}")
+        click.echo(f"Difficulty: {example.difficulty}")
         click.echo(f"{'=' * 60}")
 
-        if click.confirm("Run this demo?", default=True):
-            ctx.invoke(run, example_key=demo_key, no_cleanup=False, worker_delay=2)
+        while True:
+            choice = click.prompt("Run this demo? (y/n/cancel)").lower().strip()
+            if choice in ['y', 'yes']:
+                ctx.invoke(run, example_key=demo_key, no_cleanup=False, worker_delay=2)
+                input("\nPress Enter to continue to next demo...")
+                break
+            elif choice in ['n', 'no']:
+                click.echo("Skipped.")
+                break
+            elif choice == 'cancel':
+                click.echo("🛑 Demo tour cancelled!")
+                return
+            else:
+                click.echo("Please enter 'y', 'n', or 'cancel'")
 
-            if i < len(demos):
-                click.echo(f"\nWaiting {delay} seconds before next demo...")
-                import time
-
-                time.sleep(delay)
-        else:
-            click.echo("Skipped.")
+        if i < len(demos):
+            click.echo(f"\n⏳ Waiting {delay} seconds before next demo...")
+            import time
+            time.sleep(delay)
 
     click.echo("\n🎉 Demo tour complete!")
 
@@ -490,7 +519,23 @@ def categories(ctx):
 
     click.echo("\n📚 Queuack Example Categories\n")
 
-    for cat in sorted(registry.get_categories()):
+    # Desired category order for listing
+    desired_order = [
+        "basic",
+        "workers",
+        "dag_workflows",
+        "real_world",
+        "advanced",
+        "integration",
+    ]
+
+    def sort_key(cat):
+        try:
+            return desired_order.index(cat)
+        except ValueError:
+            return len(desired_order)  # Unknown categories at the end
+
+    for cat in sorted(examples_by_cat.keys(), key=sort_key):
         examples = examples_by_cat.get(cat, [])
 
         # Format category name nicely
@@ -587,6 +632,7 @@ def interactive(ctx):
     registry = ctx.obj["registry"]
 
     while True:
+        os.system('clear')
         click.echo("\n" + "=" * 60)
         click.echo("🦆 Queuack Examples - Interactive Mode")
         click.echo("=" * 60)
@@ -601,27 +647,118 @@ def interactive(ctx):
         choice = click.prompt("\nSelect option", type=int, default=1)
 
         if choice == 1:
-            ctx.invoke(list)
+            os.system('clear')
+            mapping = _display_numbered_examples(registry)
 
-            if click.confirm("\nRun an example?"):
-                key = click.prompt("Enter example key")
-                ctx.invoke(run, example_key=key)
+            while True:
+                choice = click.prompt("\nRun an example? (y/n/back)").lower().strip()
+                if choice in ['y', 'yes']:
+                    key = click.prompt("Enter example key or number (e.g., 1.1 or basic/simple_queue)")
+                    actual_key = mapping.get(key, key)  # Use mapping if it's a number, otherwise use as-is
+                    ctx.invoke(run, example_key=actual_key)
+                    input("\nPress Enter to continue...")
+                    break
+                elif choice in ['n', 'no']:
+                    break
+                elif choice == 'back':
+                    break
+                else:
+                    click.echo("Please enter 'y', 'n', or 'back'")
 
         elif choice == 2:
             term = click.prompt("Search term")
-            ctx.invoke(search, search_term=term)
+            registry = ctx.obj["registry"]
+            matches = registry.search(term)
+            os.system('clear')
+            mapping = _display_numbered_search_results(matches)
 
-            if click.confirm("\nRun an example?"):
-                key = click.prompt("Enter example key")
-                ctx.invoke(run, example_key=key)
+            if matches:
+                while True:
+                    choice = click.prompt("\nRun an example? (y/n/back)").lower().strip()
+                    if choice in ['y', 'yes']:
+                        key = click.prompt("Enter example key or number")
+                        actual_key = mapping.get(key, key)  # Use mapping if it's a number, otherwise use as-is
+                        ctx.invoke(run, example_key=actual_key)
+                        input("\nPress Enter to continue...")
+                        break
+                    elif choice in ['n', 'no']:
+                        break
+                    elif choice == 'back':
+                        break
+                    else:
+                        click.echo("Please enter 'y', 'n', or 'back'")
+            else:
+                input("\nPress Enter to continue...")
 
         elif choice == 3:
+            os.system('clear')
             ctx.invoke(categories)
 
-            cat = click.prompt("Select category")
-            ctx.invoke(list, category=cat, difficulty=None)
+            cat = click.prompt("Select category (or 'back' to return)")
+            if cat.lower().strip() == 'back':
+                continue
+                
+            registry = ctx.obj["registry"]
+            examples_by_cat = registry.list_by_category()
+            
+            if cat in examples_by_cat:
+                os.system('clear')
+                # Display category examples with numbers
+                click.echo(f"\n📁 {cat.upper().replace('_', ' ')}")
+                click.echo("=" * 60)
+                
+                mapping = {}
+                # Find the category number
+                desired_order = [
+                    "basic", "workers", "dag_workflows", "real_world", "advanced", "integration"
+                ]
+                try:
+                    cat_num = desired_order.index(cat) + 1
+                except ValueError:
+                    cat_num = len(desired_order) + 1
+                
+                for i, ex in enumerate(sorted(examples_by_cat[cat], key=lambda x: x.path.name), 1):
+                    key = f"{cat}/{ex.name}"
+                    numbered_key = f"{cat_num}.{i}"
+                    mapping[numbered_key] = key
+                    mapping[str(i)] = key  # Also allow just the number
+                    mapping[key] = key
+                    
+                    diff_colors = {"beginner": "green", "intermediate": "yellow", "advanced": "red"}
+                    diff = click.style(
+                        f"[{ex.difficulty}]", fg=diff_colors.get(ex.difficulty, "white")
+                    )
+                    worker = "👷" if ex.requires_worker else "  "
+                    click.echo(f"  {numbered_key:<6} {worker} {diff} {ex.description}")
+                
+                click.echo("\n" + "=" * 60)
+                click.echo("Legend: 👷 = Requires worker process")
 
-            if click.confirm("\nRun all examples in this category?"):
+                while True:
+                    choice = click.prompt("\nRun a specific example? (y/n/back)").lower().strip()
+                    if choice in ['y', 'yes']:
+                        key = click.prompt("Enter example number or key (e.g., 3.1 or linear_pipeline)")
+                        actual_key = mapping.get(key, key)
+                        ctx.invoke(run, example_key=actual_key)
+                        input("\nPress Enter to continue...")
+                        break
+                    elif choice in ['n', 'no']:
+                        break
+                    elif choice == 'back':
+                        break
+                    else:
+                        click.echo("Please enter 'y', 'n', or 'back'")
+            else:
+                click.echo(f"❌ Category '{cat}' not found")
+
+        elif choice == 4:
+            # Run all examples in a category
+            os.system('clear')
+            ctx.invoke(categories)
+            cat = click.prompt("Select category (or 'back' to return)")
+            if cat.lower().strip() == 'back':
+                continue
+            if cat in registry.list_by_category():
                 ctx.invoke(
                     run_category,
                     category=cat,
@@ -630,11 +767,13 @@ def interactive(ctx):
                     worker_delay=2,
                     continue_on_error=True,
                 )
-
-        elif choice == 4:
-            ctx.invoke(demo)
+            else:
+                click.echo(f"❌ Category '{cat}' not found")
 
         elif choice == 5:
+            ctx.invoke(demo)
+
+        elif choice == 6:
             click.echo("\n👋 Goodbye!")
             break
 
@@ -642,6 +781,91 @@ def interactive(ctx):
 # ============================================================================
 # Helper Functions
 # ============================================================================
+
+
+def _display_numbered_examples(registry):
+    """Display examples with numbered prefixes and return mapping."""
+    examples_by_cat = registry.list_by_category()
+
+    if not examples_by_cat:
+        click.echo(f"❌ No examples found")
+        return {}
+
+    # Difficulty colors
+    diff_colors = {"beginner": "green", "intermediate": "yellow", "advanced": "red"}
+
+    # Desired category order for listing
+    desired_order = [
+        "basic",
+        "workers",
+        "dag_workflows",
+        "real_world",
+        "advanced",
+        "integration",
+    ]
+
+    def sort_key(cat):
+        try:
+            return desired_order.index(cat)
+        except ValueError:
+            return len(desired_order)  # Unknown categories at the end
+
+    mapping = {}
+    category_counter = 1
+
+    for cat, examples in sorted(examples_by_cat.items(), key=lambda x: sort_key(x[0])):
+        click.echo(f"\n📁 {cat.upper().replace('_', ' ')}")
+        click.echo("=" * 60)
+
+        example_counter = 1
+        for ex in sorted(examples, key=lambda x: x.path.name):
+            # Format display
+            key = f"{cat}/{ex.name}"
+            numbered_key = f"{category_counter}.{example_counter}"
+            mapping[numbered_key] = key
+            mapping[key] = key  # Also allow the original key
+
+            diff = click.style(
+                f"[{ex.difficulty}]", fg=diff_colors.get(ex.difficulty, "white")
+            )
+            worker = "👷" if ex.requires_worker else "  "
+
+            click.echo(f"  {numbered_key:<6} {worker} {diff} {ex.description}")
+
+            example_counter += 1
+
+        category_counter += 1
+
+    click.echo("\n" + "=" * 60)
+    click.echo("Legend: 👷 = Requires worker process")
+    click.echo("\nRun an example: python run_examples.py run <key> or <number>")
+
+    return mapping
+
+
+def _display_numbered_search_results(matches):
+    """Display search results with numbered prefixes and return mapping."""
+    if not matches:
+        return {}
+
+    click.echo(f"\nFound {len(matches)} examples:\n")
+
+    diff_colors = {"beginner": "green", "intermediate": "yellow", "advanced": "red"}
+    mapping = {}
+
+    for i, (key, ex) in enumerate(matches, 1):
+        numbered_key = str(i)
+        mapping[numbered_key] = key
+        mapping[key] = key  # Also allow the original key
+
+        diff = click.style(
+            f"[{ex.difficulty}]", fg=diff_colors.get(ex.difficulty, "white")
+        )
+        worker = "👷" if ex.requires_worker else "  "
+        click.echo(f"  {numbered_key:<3} {worker} {diff} {key:<35} {ex.description}")
+
+    click.echo("\nRun: python run_examples.py run <key> or <number>")
+    return mapping
 
 
 def _run_simple(example: Example, no_cleanup: bool):

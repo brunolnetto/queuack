@@ -1,4 +1,4 @@
-.PHONY: help clean test coverage docs servedocs install bump publish release
+.PHONY: help clean test coverage docs servedocs install bump publish release examples
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
@@ -59,11 +59,11 @@ clean: clean-build clean-pyc clean-test clean-cache ## remove all build, test, c
 	@echo "Cleaned all artifacts! 🧹"
 
 test: clean ## run tests quickly with the default Python
-	PYTHONPATH=$$(pwd) python3 -m pytest
+	PYTHONPATH=$$(pwd) python3 -m pytest --durations=20 --durations-min=1
 	@echo "Tests completed! ✅"
 
 cov: clean ## check code coverage quickly with the default Python
-	PYTHONPATH=$$(pwd) python3 -m pytest --cov=queuack --cov-report=term-missing --durations=10
+	PYTHONPATH=$$(pwd) python3 -m pytest --cov=queuack --cov-report=term-missing --durations=20 --durations-min=1
 	@echo "Coverage tests completed! ✅"
 
 watch: ## run tests on watchdog mode
@@ -85,6 +85,10 @@ check: clean lint type ## run all code quality checks
 	make lint
 	make type
 	@echo "All checks passed! ✅"
+
+examples: ## run the examples interactive mode (access all commands)
+	PYTHONPATH=$$(pwd) python3 scripts/run_examples.py interactive
+	@echo "Examples completed! 🦆"
 
 env: ## Creates a virtual environment. Usage: make env
 	uv venv
