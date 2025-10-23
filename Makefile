@@ -58,12 +58,12 @@ clean-cache: # remove test and coverage artifacts
 clean: clean-build clean-pyc clean-test clean-cache ## remove all build, test, coverage, Python artifacts, cache and docs
 	@echo "Cleaned all artifacts! 🧹"
 
-test: ## run tests quickly with the default Python
+test: clean ## run tests quickly with the default Python
 	PYTHONPATH=$$(pwd) python3 -m pytest
 	@echo "Tests completed! ✅"
 
 cov: clean ## check code coverage quickly with the default Python
-	uv run pytest --cov=queuack --cov-report=term-missing --durations=10
+	PYTHONPATH=$$(pwd) python3 -m pytest --cov=queuack --cov-report=term-missing --durations=10
 	@echo "Coverage tests completed! ✅"
 
 watch: ## run tests on watchdog mode
@@ -109,11 +109,14 @@ bump: ## bump version to user-provided {patch|minor|major} semantic
 	git tag "v$(PACKAGE_VERSION)"
 	git push
 	git push --tags
+	@echo "Bumped version to $(PACKAGE_VERSION)! 🎉"
 
 publish: clean ## build source and publish package
 	uv build
 	uv publish
+	@echo "Published package $(PACKAGE_NAME) version $(PACKAGE_VERSION)! 🚀"
 
 release: ## release package on PyPI
 	$(MAKE) bump v=$(v)
 	$(MAKE) publish
+	@echo "Released package $(PACKAGE_NAME) version $(PACKAGE_VERSION)! 🚀"
