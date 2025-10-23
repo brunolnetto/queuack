@@ -1292,7 +1292,7 @@ class Worker:
     def _run_concurrent(self, poll_interval: float):
         """Multi-threaded execution with backpressure."""
         import threading
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
         processed = 0
         lock = threading.Lock()
@@ -1323,11 +1323,9 @@ class Worker:
                         # When stopping, wait for all futures without timeout
                         # When running, use poll_interval timeout
                         timeout = None if self.should_stop else poll_interval
-                        done_futures = list(
-                            as_completed(futures.keys(), timeout=timeout)
-                        )
-
-                        for future in done_futures:
+                        
+                        # Iterate through completed futures
+                        for future in as_completed(futures.keys(), timeout=timeout):
                             job_id = futures.pop(future)
                             try:
                                 future.result()  # Raise any exceptions

@@ -1,6 +1,5 @@
 name: Coverage CI
 on: [push, pull_request]
-
 jobs:
   code-quality:
     runs-on: ubuntu-latest
@@ -11,60 +10,48 @@ jobs:
         with:
           codesee-token: ${{ secrets.CODESEE_ARCH_DIAG_API_TOKEN }}
           codesee-url: https://app.codesee.io
-
   lint:
     runs-on: ubuntu-latest
-
     strategy:
       max-parallel: 3
       fail-fast: false
       matrix:
         python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
-
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
-
       - name: "Install and run pre-commit via tox"
         run: |
           python -m pip install tox==3.27.1 tox-gh-actions
           python -m tox -vv
-
   tests:
     runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
-
     strategy:
       max-parallel: 4
       fail-fast: false
       matrix:
         python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
-
     environment: codecov
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
-
       - name: Set up python
         id: setup-python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
-
       # Install uv tool *without* cache behavior so we can generate uv.lock
       - name: Install uv (tool, no cache) - create uv.lock
         uses: astral-sh/setup-uv@v3
         with:
           version: "0.9.5"
           enable-cache: false
-
       - name: Debug - show repo and python
         run: |
           echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
@@ -72,7 +59,6 @@ jobs:
           python -V
           which python || true
           uv --version || true
-
       # Create uv.lock for this execution (will be used by the setup-uv cache step below)
       - name: Generate uv.lock
         run: |
@@ -81,7 +67,6 @@ jobs:
           echo "Produced uv.lock:"
           ls -la uv.lock || true
           sed -n '1,200p' uv.lock || true
-
       # Now run setup-uv again, letting it use the uv.lock for caching
       - name: Install uv (tool) with cache dependency (uses uv.lock)
         uses: astral-sh/setup-uv@v3
@@ -89,7 +74,6 @@ jobs:
           version: "0.9.5"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
-
       #----------------------------------------------
       # Cache pip and wheelhouse (before uv sync)
       #----------------------------------------------
@@ -102,23 +86,32 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml','**/uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-pip-
-
       - name: Upgrade pip, setuptools, wheel
         run: python -m pip install --upgrade pip setuptools wheel
-
       - name: Install dependencies (uv)
         run: uv sync --group test
-
       - name: Run tests
         run: uv run python3 -m pytest
-
       - name: Run tests and generate coverage
         run: |
           uv run python3 -m pytest --cov=queuack tests/ --junitxml=junit.xml -o junit_family=legacy
-
+      
+      # Upload coverage to Codecov (for code coverage)
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+      
+      # Upload test results to Codecov (for test analytics)
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-
+          files: ./junit.xml
+          fail_ci_if_error: false
