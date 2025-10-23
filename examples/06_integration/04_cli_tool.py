@@ -110,7 +110,7 @@ def dag_status(ctx, dag_run_id):
     """Check DAG run status."""
     queue = ctx.obj["queue"]
 
-    from queuack.dag_context import DAGRun
+    from queuack.dag import DAGRun
 
     dag_run = DAGRun(queue, dag_run_id)
 

@@ -241,7 +241,7 @@ with queue.dag("daily_etl", description="Daily ETL job") as dag:
     )
 
 # Monitor execution
-from queuack.dag_context import DAGRun
+from queuack.dag import DAGRun
 
 dag_run = DAGRun(queue, dag.dag_run_id)
 
