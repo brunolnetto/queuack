@@ -1,27 +1,27 @@
 from .core import (
-    DuckQueue, 
-    ConnectionPool, 
-    Worker, 
+    DuckQueue,
+    ConnectionPool,
+    Worker,
     WorkerPool,
     job,
 )
 from .dag import (
-    DAGEngine, 
+    DAGEngine,
 )
 from .dag_context import (
     DAGContext,
     DAGRun,
 )
 from .status import (
-    JobStatus, 
+    JobStatus,
     NodeStatus,
     DAGRunStatus,
-    DependencyMode, 
-    job_status_to_node_status, 
-    node_status_to_job_status
+    DependencyMode,
+    job_status_to_node_status,
+    node_status_to_job_status,
 )
 from .job_store import (
-    InMemoryJobStore, 
+    InMemoryJobStore,
     DuckQueueAdapter,
 )
 from .data_models import (
@@ -39,26 +39,21 @@ __all__ = [
     "Worker",
     "WorkerPool",
     "job",
-
     # data model exports
     "Job",
     "JobSpec",
     "DAGNode",
-
     # dag exports
     "DAGEngine",
-
     # dag_context exports
     "DAGRun",
     "DAGContext",
-
     # status exports
     "DAGRunStatus",
     "NodeStatus",
     "DependencyMode",
     "job_status_to_node_status",
     "node_status_to_job_status",
-    
     # job_store exports
     "InMemoryJobStore",
     "DuckQueueAdapter",

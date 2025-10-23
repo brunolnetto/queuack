@@ -7,6 +7,7 @@ from queuack.core import DuckQueue
 def noop():
     return None
 
+
 # This benchmark is skipped by default. Enable by setting RUN_LARGE_BENCH=1
 RUN_BENCH = os.environ.get("RUN_LARGE_BENCH", "0") == "1"
 
@@ -43,7 +44,9 @@ def test_large_dag_propagation(tmp_path):
     # Optional: create a composite index to test differences
     create_composite = os.environ.get("BENCH_COMPOSITE_INDEX", "0") == "1"
     if create_composite:
-        q.conn.execute("CREATE INDEX IF NOT EXISTS idx_jd_parent_child ON job_dependencies(parent_job_id, child_job_id)")
+        q.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jd_parent_child ON job_dependencies(parent_job_id, child_job_id)"
+        )
 
     # Explain the recursive CTE used in ack propagation by constructing the same SQL
     explain_sql = """
@@ -92,7 +95,9 @@ def test_large_dag_propagation(tmp_path):
 
     # Show EXPLAIN output (helpful for CI logs)
     try:
-        explain_out = q.conn.execute("EXPLAIN " + explain_sql, [root, f"bench_root:{root}", 'bench']).fetchall()
+        explain_out = q.conn.execute(
+            "EXPLAIN " + explain_sql, [root, f"bench_root:{root}", "bench"]
+        ).fetchall()
         print("EXPLAIN output (first 10 rows):")
         for r in explain_out[:10]:
             print(r)
@@ -107,8 +112,12 @@ def test_large_dag_propagation(tmp_path):
     duration = time.perf_counter() - start
 
     total_jobs = q.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-    skipped = q.conn.execute("SELECT COUNT(*) FROM jobs WHERE status = 'skipped'").fetchone()[0]
+    skipped = q.conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE status = 'skipped'"
+    ).fetchone()[0]
 
-    print(f"Layers={LAYERS} Branch={BRANCH} total_jobs={total_jobs} skipped={skipped} duration_s={duration:.4f}")
+    print(
+        f"Layers={LAYERS} Branch={BRANCH} total_jobs={total_jobs} skipped={skipped} duration_s={duration:.4f}"
+    )
     # Basic sanity: at least one job should be skipped (except trivial cases)
     assert skipped >= 0

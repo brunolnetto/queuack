@@ -3,46 +3,52 @@
 Keep queue-level and DAG-level states separate but provide helpers to map
 between the two at the boundary.
 """
+
 from enum import Enum
 
 
 class JobStatus(Enum):
     """Job lifecycle states."""
-    PENDING = "pending"      # Waiting to be claimed
-    CLAIMED = "claimed"      # Worker has claimed it
-    DONE = "done"            # Successfully completed
-    FAILED = "failed"        # Failed after max retries
-    DELAYED = "delayed"      # Scheduled for future execution
-    SKIPPED = "skipped"      # Skipped/abandoned due to parent failure
+
+    PENDING = "pending"  # Waiting to be claimed
+    CLAIMED = "claimed"  # Worker has claimed it
+    DONE = "done"  # Successfully completed
+    FAILED = "failed"  # Failed after max retries
+    DELAYED = "delayed"  # Scheduled for future execution
+    SKIPPED = "skipped"  # Skipped/abandoned due to parent failure
 
 
 class NodeStatus(Enum):
     """Status of a node in the DAG."""
-    PENDING = "pending"      # Not yet eligible to run
-    READY = "ready"          # All dependencies met, can run now
-    RUNNING = "running"      # Currently executing
-    DONE = "done"            # Successfully completed
-    FAILED = "failed"        # Failed execution
-    SKIPPED = "skipped"      # Skipped due to parent failure
+
+    PENDING = "pending"  # Not yet eligible to run
+    READY = "ready"  # All dependencies met, can run now
+    RUNNING = "running"  # Currently executing
+    DONE = "done"  # Successfully completed
+    FAILED = "failed"  # Failed execution
+    SKIPPED = "skipped"  # Skipped due to parent failure
 
 
 class DependencyMode(Enum):
     """How to handle multiple parent dependencies."""
+
     ALL = "all"  # All parents must succeed (default, AND logic)
     ANY = "any"  # At least one parent must succeed (OR logic)
 
 
 class DAGRunStatus(Enum):
     """Status of a DAG run."""
-    PENDING = "pending"      # DAG created but not submitted
-    RUNNING = "running"      # Some jobs still executing
-    DONE = "done"            # All jobs completed successfully
-    FAILED = "failed"        # At least one job failed
+
+    PENDING = "pending"  # DAG created but not submitted
+    RUNNING = "running"  # Some jobs still executing
+    DONE = "done"  # All jobs completed successfully
+    FAILED = "failed"  # At least one job failed
     CANCELLED = "cancelled"  # DAG execution cancelled
 
 
-
-def job_status_to_node_status(job_status: JobStatus, *, claimed_started: bool = False) -> NodeStatus:
+def job_status_to_node_status(
+    job_status: JobStatus, *, claimed_started: bool = False
+) -> NodeStatus:
     """Map a JobStatus (DB/queue) to a NodeStatus (DAG engine).
 
     Args:
@@ -69,7 +75,9 @@ def job_status_to_node_status(job_status: JobStatus, *, claimed_started: bool = 
     raise ValueError(f"Unsupported JobStatus: {job_status}")
 
 
-def node_status_to_job_status(node_status: NodeStatus, *, map_skipped_to_failed: bool = True) -> JobStatus:
+def node_status_to_job_status(
+    node_status: NodeStatus, *, map_skipped_to_failed: bool = True
+) -> JobStatus:
     """Map a NodeStatus (DAG engine) to a JobStatus (DB/queue).
 
     Args:

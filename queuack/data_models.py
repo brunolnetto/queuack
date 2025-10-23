@@ -51,7 +51,6 @@ and mutable defaults). For schema-level documentation see the SQL
 schema in ``queuack.core`` where the ``jobs`` table is created.
 """
 
-
 import pickle
 import logging
 from dataclasses import dataclass
@@ -69,11 +68,12 @@ logger = logging.getLogger(__name__)
 # Data Models
 # ============================================================================
 
+
 @dataclass
 class Job:
     """
     Represents a serialized function call to be executed.
-    
+
     Attributes:
         id: Unique job identifier
         func: Function to execute (serialized)
@@ -93,6 +93,7 @@ class Job:
         result: Serialized result (if successful)
         error: Error message (if failed)
     """
+
     id: str
     func: bytes  # Pickled function
     args: bytes  # Pickled args tuple
@@ -115,34 +116,41 @@ class Job:
     skipped_by: Optional[str] = None
     node_name: Optional[str] = None
     dag_run_id: Optional[str] = None
-    dependency_mode: str = 'all'  # 'all' or 'any'
-    
+    dependency_mode: str = "all"  # 'all' or 'any'
+
     def __post_init__(self):
         if self.created_at is None:
             self.created_at = datetime.now()
-    
-    def execute(self) -> Any:
+
+    def execute(self, logger: Optional[logging.Logger] = None) -> Any:
         """
         Execute the job (unpickle function and call it).
-        
+
+        Args:
+            logger: Optional logger to use for execution logging
+
         Returns:
             Function result
-        
+
         Raises:
             Any exception from the function
         """
+        if logger is None:
+            logger = logging.getLogger(__name__)
+
         func = pickle.loads(self.func)
         args = pickle.loads(self.args)
         kwargs = pickle.loads(self.kwargs)
-        
+
         logger.info(f"Executing {func.__name__}(*{args}, **{kwargs})")
-        
+
         return func(*args, **kwargs)
 
 
 @dataclass
 class JobSpec:
     """Specification for a job to be enqueued."""
+
     func: Callable
     args: Tuple = ()
     kwargs: Dict = None
@@ -152,40 +160,44 @@ class JobSpec:
     max_attempts: int = 3
     timeout_seconds: int = 300
     dependency_mode: DependencyMode = DependencyMode.ALL
-    
+
     def __post_init__(self):
         if self.kwargs is None:
             self.kwargs = {}
 
+
 @dataclass
 class DAGNode:
     """Represents a node (job) in the DAG."""
+
     id: str
     name: str
     status: NodeStatus = NodeStatus.PENDING
     dependency_mode: DependencyMode = DependencyMode.ALL
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     def __hash__(self):
         return hash(self.id)
-    
+
     def __eq__(self, other):
         return isinstance(other, DAGNode) and self.id == other.id
 
 
 class BackpressureError(Exception):
-        """Raised when queue depth exceeds safe limits.
+    """Raised when queue depth exceeds safe limits.
 
-        Used to signal producers that the system is overloaded and enqueuing
-        should be deferred or retried with backoff.
-        """
-        pass
+    Used to signal producers that the system is overloaded and enqueuing
+    should be deferred or retried with backoff.
+    """
+
+    pass
 
 
 class DAGValidationError(Exception):
-        """Raised when DAG has structural problems (cycles, invalid nodes).
+    """Raised when DAG has structural problems (cycles, invalid nodes).
 
-        This exception should be raised during DAG construction/validation
-        and is not intended to be swallowed silently.
-        """
-        pass
+    This exception should be raised during DAG construction/validation
+    and is not intended to be swallowed silently.
+    """
+
+    pass

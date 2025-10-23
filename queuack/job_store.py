@@ -8,6 +8,7 @@ from datetime import datetime
 from .status import JobStatus
 from .data_models import Job
 
+
 class JobStore(Protocol):
     """Minimal interface the DAG engine uses to persist job state.
 
@@ -15,15 +16,18 @@ class JobStore(Protocol):
     persistence layer (e.g. DuckQueue) or an in-memory fake for tests.
     """
 
-    def get_job(self, job_id: str):
-        ...
+    def get_job(self, job_id: str): ...
 
-    def update_job_status(self, job_id: str, *, status: Optional[object] = None,
-                          skipped_at: Optional[datetime] = None,
-                          skip_reason: Optional[str] = None,
-                          skipped_by: Optional[str] = None,
-                          attempts: Optional[int] = None) -> None:
-        ...
+    def update_job_status(
+        self,
+        job_id: str,
+        *,
+        status: Optional[object] = None,
+        skipped_at: Optional[datetime] = None,
+        skip_reason: Optional[str] = None,
+        skipped_by: Optional[str] = None,
+        attempts: Optional[int] = None,
+    ) -> None: ...
 
     def bulk_update(self, updates: Iterable[Dict[str, Any]]) -> None:
         """Apply multiple updates. Each item is a dict with 'id' and keyword args for update_job_status."""
@@ -37,7 +41,7 @@ class InMemoryJobStore:
     Job instance fields.
     """
 
-    def __init__(self, jobs: Optional[Iterable['Job']] = None):
+    def __init__(self, jobs: Optional[Iterable["Job"]] = None):
         self._jobs: Dict[str, Job] = {}
         if jobs:
             for j in jobs:
@@ -46,11 +50,16 @@ class InMemoryJobStore:
     def get_job(self, job_id: str) -> Optional[Job]:
         return self._jobs.get(job_id)
 
-    def update_job_status(self, job_id: str, *, status: Optional[JobStatus] = None,
-                          skipped_at: Optional[datetime] = None,
-                          skip_reason: Optional[str] = None,
-                          skipped_by: Optional[str] = None,
-                          attempts: Optional[int] = None) -> None:
+    def update_job_status(
+        self,
+        job_id: str,
+        *,
+        status: Optional[JobStatus] = None,
+        skipped_at: Optional[datetime] = None,
+        skip_reason: Optional[str] = None,
+        skipped_by: Optional[str] = None,
+        attempts: Optional[int] = None,
+    ) -> None:
         job = self._jobs.get(job_id)
         if job is None:
             return
@@ -69,7 +78,7 @@ class InMemoryJobStore:
 
     def bulk_update(self, updates: Iterable[Dict[str, Any]]) -> None:
         for upd in updates:
-            job_id = upd.pop('id')
+            job_id = upd.pop("id")
             self.update_job_status(job_id, **upd)
 
 
@@ -89,18 +98,23 @@ class DuckQueueAdapter(JobStore):
     def get_job(self, job_id: str):
         return self.queue.get_job(job_id)
 
-    def update_job_status(self, job_id: str, *, status: Optional[object] = None,
-                            skipped_at: Optional[datetime] = None,
-                            skip_reason: Optional[str] = None,
-                            skipped_by: Optional[str] = None,
-                            attempts: Optional[int] = None) -> None:
+    def update_job_status(
+        self,
+        job_id: str,
+        *,
+        status: Optional[object] = None,
+        skipped_at: Optional[datetime] = None,
+        skip_reason: Optional[str] = None,
+        skipped_by: Optional[str] = None,
+        attempts: Optional[int] = None,
+    ) -> None:
         sets: List[str] = []
         params: List[Any] = []
 
         status_val = None
         if status is not None:
             # Support either enum-like objects with `.value` or raw strings
-            status_val = getattr(status, 'value', None) or str(status)
+            status_val = getattr(status, "value", None) or str(status)
             sets.append("status = ?")
             params.append(status_val)
 
@@ -115,7 +129,7 @@ class DuckQueueAdapter(JobStore):
             params.append(skipped_by)
 
         # If marking as skipped, finalize attempts to max_attempts in SQL.
-        is_skipped_update = status_val == 'skipped'
+        is_skipped_update = status_val == "skipped"
 
         if attempts is not None and not is_skipped_update:
             sets.append("attempts = ?")
@@ -130,14 +144,16 @@ class DuckQueueAdapter(JobStore):
         with self.queue._db_lock:
             if is_skipped_update:
                 # Append attempts = max_attempts to the SET clause
-                sql = sql.replace("WHERE id = ?", ", attempts = max_attempts WHERE id = ?")
+                sql = sql.replace(
+                    "WHERE id = ?", ", attempts = max_attempts WHERE id = ?"
+                )
 
             self.queue.conn.execute(sql, params)
 
     def bulk_update(self, updates: Iterable[Dict[str, Any]]) -> None:
         with self.queue._db_lock:
             for upd in updates:
-                job_id = upd.pop('id', None)
+                job_id = upd.pop("id", None)
                 if not job_id:
                     continue
                 self.update_job_status(job_id, **upd)
