@@ -48,7 +48,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       # Install uv tool *without* cache behavior so we can generate uv.lock
       - name: Install uv (tool, no cache) - create uv.lock
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.5"
           enable-cache: false
@@ -69,7 +69,7 @@ jobs:
           sed -n '1,200p' uv.lock || true
       # Now run setup-uv again, letting it use the uv.lock for caching
       - name: Install uv (tool) with cache dependency (uses uv.lock)
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.5"
           enable-cache: true
