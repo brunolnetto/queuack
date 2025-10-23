@@ -65,7 +65,7 @@ jobs:
           version: "0.9.5"
           enable-cache: false
 
-      - name: Debug: show repo and python
+      - name: Debug - show repo and python
         run: |
           echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
           ls -la .
