@@ -818,7 +818,7 @@ class TestWorker:
         worker = Worker(queue)
         assert worker.should_stop == False
         worker._signal_handler(None, None)
-        assert worker.should_stop == True
+        assert worker.should_stop 
 
     def test_worker_claim_next_job(self, queue: DuckQueue):
         worker = Worker(queue, queues=["emails", "reports"])
@@ -1396,7 +1396,7 @@ class TestWorkerPool:
         pool = WorkerPool(queue, num_workers=2, concurrency=1)
         pool.start()
 
-        assert pool.running == True
+        assert pool.running 
         assert len(pool.workers) == 2
         assert len(pool.threads) == 2
 
@@ -1414,7 +1414,7 @@ class TestWorkerPool:
 
         # Check all workers received stop signal
         for worker in pool.workers:
-            assert worker.should_stop == True
+            assert worker.should_stop 
 
     def test_worker_pool_processes_jobs(self, queue: DuckQueue):
         # Enqueue jobs
@@ -1440,7 +1440,7 @@ class TestWorkerPool:
 
         # Use context manager
         with WorkerPool(queue, num_workers=2) as pool:
-            assert pool.running == True
+            assert pool.running 
             time.sleep(1)
 
         # After context, pool should be stopped
@@ -1671,19 +1671,13 @@ class TestNewFeaturesIntegration:
 
             time.sleep(0.5)
             job = q.get_job(job_id)
-            assert job.status in [
-                JobStatus.DELAYED.value, 
-                JobStatus.PENDING.value
-            ]
+            assert job.status in [JobStatus.DELAYED.value, JobStatus.PENDING.value]
 
             # Wait longer for worker to process
             time.sleep(1)  # Increase from 1 to 2
             job = q.get_job(job_id)
 
-            assert job.status in [
-                JobStatus.DONE.value, 
-                JobStatus.CLAIMED.value
-            ], (
+            assert job.status in [JobStatus.DONE.value, JobStatus.CLAIMED.value], (
                 f"Expected done/claimed, got {job.status}"
             )
 
@@ -1707,9 +1701,7 @@ class TestNewFeaturesIntegration:
 
     def test_batch_enqueue_with_worker_pool(self):
         """Test batch enqueueing works with WorkerPool."""
-        with DuckQueue(
-            ":memory:", workers_num=2, worker_concurrency=2
-        ) as q:
+        with DuckQueue(":memory:", workers_num=2, worker_concurrency=2) as q:
             # Batch enqueue
             jobs = [(add, (i, i), {}) for i in range(20)]
             job_ids = q.enqueue_batch(jobs)
@@ -1830,14 +1822,11 @@ def test_enqueue_persists_dependencies_and_claim_respects_them(queue):
     parent_id = queue.enqueue(parent_func, args=(1, 2), kwargs={})
 
     # Enqueue child that depends on parent
-    child_id = queue.enqueue(
-        child_func, args=(3, 4), kwargs={}, depends_on=parent_id
-    )
+    child_id = queue.enqueue(child_func, args=(3, 4), kwargs={}, depends_on=parent_id)
 
     # The dependency should be persisted in the job_dependencies table
     row = queue.conn.execute(
-        "SELECT parent_job_id FROM job_dependencies WHERE child_job_id = ?", 
-        [child_id]
+        "SELECT parent_job_id FROM job_dependencies WHERE child_job_id = ?", [child_id]
     ).fetchone()
     assert row is not None and row[0] == parent_id
 
@@ -1864,9 +1853,7 @@ def test_ack_propagates_skipped_to_descendants(queue):
     c = queue.enqueue(c_func, args=(), kwargs={}, depends_on=b)
 
     # Force A into permanent failure by setting attempts = max_attempts
-    queue.conn.execute(
-        "UPDATE jobs SET attempts = max_attempts WHERE id = ?", [a]
-    )
+    queue.conn.execute("UPDATE jobs SET attempts = max_attempts WHERE id = ?", [a])
 
     # Ack A with an error to trigger permanent failure handling
     queue.ack(a, error="permanent")
@@ -1924,7 +1911,7 @@ class TestWorkerSignalHandling:
         # Call signal handler
         worker._signal_handler(None, None)
 
-        assert worker.should_stop == True
+        assert worker.should_stop 
 
         queue.close()
 
@@ -2198,7 +2185,7 @@ class TestWorkerPoolEdgeCases:
 
         # Workers should be stopped
         for worker in pool.workers:
-            assert worker.should_stop == True
+            assert worker.should_stop 
 
         queue.close()
 
@@ -2209,7 +2196,7 @@ class TestWorkerPoolEdgeCases:
         pool = WorkerPool(queue, num_workers=2)
         pool.start()
 
-        assert pool.running == True
+        assert pool.running 
         assert len(pool.workers) == 2
 
         # Start again (should be idempotent or handled)

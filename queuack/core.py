@@ -99,7 +99,6 @@ class DuckQueue:
         self._db_lock = threading.RLock()
         self._worker_pool = None
 
-
     # Backpressure thresholds are configurable via classmethods so tests
     # or subclasses can override them for faster runs.
     @classmethod
@@ -555,22 +554,19 @@ For more complex cases, consider using JSON-serializable function references.
     # ========================================================================
 
     def claim(
-        self,
-        queue: str = None,
-        worker_id: str = None,
-        claim_timeout: int = 300
+        self, queue: str = None, worker_id: str = None, claim_timeout: int = 300
     ) -> Optional[Job]:
         """
         Atomically claim next pending job.
-        
+
         Args:
             queue: Queue to claim from (defaults to self.default_queue)
             worker_id: Worker identifier (auto-generated if None)
             claim_timeout: Seconds before claim expires (for stale job recovery)
-        
+
         Returns:
             Job object or None if queue empty
-        
+
         Example:
             while True:
                 job = queue.claim()
@@ -583,21 +579,25 @@ For more complex cases, consider using JSON-serializable function references.
         queue = queue or self.default_queue
         worker_id = worker_id or self._generate_worker_id()
         now = datetime.now()
-        
+
         with self._db_lock:
             # Promote delayed jobs that are ready
-            self.conn.execute("""
+            self.conn.execute(
+                """
                 UPDATE jobs
                 SET status = 'pending'
                 WHERE status = 'delayed'
                 AND execute_after <= ?
-            """, [now])
-            
+            """,
+                [now],
+            )
+
             # Atomic claim with stale job recovery
             # Only claim a job if its dependencies are satisfied based on dependency_mode:
             # - 'all': ALL parents must be 'done'
             # - 'any': AT LEAST ONE parent must be 'done'
-            result = self.conn.execute("""
+            result = self.conn.execute(
+                """
                 UPDATE jobs
                 SET 
                     status = 'claimed',
@@ -643,23 +643,19 @@ For more complex cases, consider using JSON-serializable function references.
                     LIMIT 1
                 )
                 RETURNING *
-            """, [
-                now,
-                worker_id,
-                queue,
-                now - timedelta(seconds=claim_timeout),
-                now
-            ]).fetchone()
-            
+            """,
+                [now, worker_id, queue, now - timedelta(seconds=claim_timeout), now],
+            ).fetchone()
+
             if result is None:
                 return None
-            
+
             # Convert to Job object
             columns = [desc[0] for desc in self.conn.description]
             job_dict = dict(zip(columns, result))
-            
+
             self.logger.info(f"Claimed job {job_dict['id'][:8]} by {worker_id}")
-            
+
             return Job(**job_dict)
 
     def claim_batch(
@@ -1120,7 +1116,7 @@ For more complex cases, consider using JSON-serializable function references.
             return
 
         self._closed = True
-        
+
         # Stop cache refresh
         if self._cache_refresh_thread:
             self._cache_refresh_running = False
@@ -1312,12 +1308,12 @@ class Worker:
                     batch_size = min(self.batch_size, capacity)
 
                     job = self._claim_next_job()
-                    
+
                     if job:
                         with lock:
                             processed += 1
                             job_num = processed
-                        
+
                         future = executor.submit(self._execute_job, job, job_num)
                         futures[future] = job.id
 

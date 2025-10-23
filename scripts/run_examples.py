@@ -444,7 +444,7 @@ def demo(ctx, delay):
 
     # Auto-select demos: first example from each category
     demos = []
-    
+
     # Desired category order for listing
     desired_order = [
         "basic",
@@ -488,14 +488,14 @@ def demo(ctx, delay):
 
         while True:
             choice = click.prompt("Run this demo? (y/n/cancel)").lower().strip()
-            if choice in ['y', 'yes']:
+            if choice in ["y", "yes"]:
                 ctx.invoke(run, example_key=demo_key, no_cleanup=False, worker_delay=2)
                 input("\nPress Enter to continue to next demo...")
                 break
-            elif choice in ['n', 'no']:
+            elif choice in ["n", "no"]:
                 click.echo("Skipped.")
                 break
-            elif choice == 'cancel':
+            elif choice == "cancel":
                 click.echo("🛑 Demo tour cancelled!")
                 return
             else:
@@ -504,6 +504,7 @@ def demo(ctx, delay):
         if i < len(demos):
             click.echo(f"\n⏳ Waiting {delay} seconds before next demo...")
             import time
+
             time.sleep(delay)
 
     click.echo("\n🎉 Demo tour complete!")
@@ -632,7 +633,7 @@ def interactive(ctx):
     registry = ctx.obj["registry"]
 
     while True:
-        os.system('clear')
+        os.system("clear")
         click.echo("\n" + "=" * 60)
         click.echo("🦆 Queuack Examples - Interactive Mode")
         click.echo("=" * 60)
@@ -647,20 +648,24 @@ def interactive(ctx):
         choice = click.prompt("\nSelect option", type=int, default=1)
 
         if choice == 1:
-            os.system('clear')
+            os.system("clear")
             mapping = _display_numbered_examples(registry)
 
             while True:
                 choice = click.prompt("\nRun an example? (y/n/back)").lower().strip()
-                if choice in ['y', 'yes']:
-                    key = click.prompt("Enter example key or number (e.g., 1.1 or basic/simple_queue)")
-                    actual_key = mapping.get(key, key)  # Use mapping if it's a number, otherwise use as-is
+                if choice in ["y", "yes"]:
+                    key = click.prompt(
+                        "Enter example key or number (e.g., 1.1 or basic/simple_queue)"
+                    )
+                    actual_key = mapping.get(
+                        key, key
+                    )  # Use mapping if it's a number, otherwise use as-is
                     ctx.invoke(run, example_key=actual_key)
                     input("\nPress Enter to continue...")
                     break
-                elif choice in ['n', 'no']:
+                elif choice in ["n", "no"]:
                     break
-                elif choice == 'back':
+                elif choice == "back":
                     break
                 else:
                     click.echo("Please enter 'y', 'n', or 'back'")
@@ -669,21 +674,25 @@ def interactive(ctx):
             term = click.prompt("Search term")
             registry = ctx.obj["registry"]
             matches = registry.search(term)
-            os.system('clear')
+            os.system("clear")
             mapping = _display_numbered_search_results(matches)
 
             if matches:
                 while True:
-                    choice = click.prompt("\nRun an example? (y/n/back)").lower().strip()
-                    if choice in ['y', 'yes']:
+                    choice = (
+                        click.prompt("\nRun an example? (y/n/back)").lower().strip()
+                    )
+                    if choice in ["y", "yes"]:
                         key = click.prompt("Enter example key or number")
-                        actual_key = mapping.get(key, key)  # Use mapping if it's a number, otherwise use as-is
+                        actual_key = mapping.get(
+                            key, key
+                        )  # Use mapping if it's a number, otherwise use as-is
                         ctx.invoke(run, example_key=actual_key)
                         input("\nPress Enter to continue...")
                         break
-                    elif choice in ['n', 'no']:
+                    elif choice in ["n", "no"]:
                         break
-                    elif choice == 'back':
+                    elif choice == "back":
                         break
                     else:
                         click.echo("Please enter 'y', 'n', or 'back'")
@@ -691,60 +700,77 @@ def interactive(ctx):
                 input("\nPress Enter to continue...")
 
         elif choice == 3:
-            os.system('clear')
+            os.system("clear")
             ctx.invoke(categories)
 
             cat = click.prompt("Select category (or 'back' to return)")
-            if cat.lower().strip() == 'back':
+            if cat.lower().strip() == "back":
                 continue
-                
+
             registry = ctx.obj["registry"]
             examples_by_cat = registry.list_by_category()
-            
+
             if cat in examples_by_cat:
-                os.system('clear')
+                os.system("clear")
                 # Display category examples with numbers
                 click.echo(f"\n📁 {cat.upper().replace('_', ' ')}")
                 click.echo("=" * 60)
-                
+
                 mapping = {}
                 # Find the category number
                 desired_order = [
-                    "basic", "workers", "dag_workflows", "real_world", "advanced", "integration"
+                    "basic",
+                    "workers",
+                    "dag_workflows",
+                    "real_world",
+                    "advanced",
+                    "integration",
                 ]
                 try:
                     cat_num = desired_order.index(cat) + 1
                 except ValueError:
                     cat_num = len(desired_order) + 1
-                
-                for i, ex in enumerate(sorted(examples_by_cat[cat], key=lambda x: x.path.name), 1):
+
+                for i, ex in enumerate(
+                    sorted(examples_by_cat[cat], key=lambda x: x.path.name), 1
+                ):
                     key = f"{cat}/{ex.name}"
                     numbered_key = f"{cat_num}.{i}"
                     mapping[numbered_key] = key
                     mapping[str(i)] = key  # Also allow just the number
                     mapping[key] = key
-                    
-                    diff_colors = {"beginner": "green", "intermediate": "yellow", "advanced": "red"}
+
+                    diff_colors = {
+                        "beginner": "green",
+                        "intermediate": "yellow",
+                        "advanced": "red",
+                    }
                     diff = click.style(
                         f"[{ex.difficulty}]", fg=diff_colors.get(ex.difficulty, "white")
                     )
                     worker = "👷" if ex.requires_worker else "  "
                     click.echo(f"  {numbered_key:<6} {worker} {diff} {ex.description}")
-                
+
                 click.echo("\n" + "=" * 60)
                 click.echo("Legend: 👷 = Requires worker process")
 
                 while True:
-                    choice = click.prompt("\nRun a specific example? (y/n/back)").lower().strip()
-                    if choice in ['y', 'yes']:
-                        key = click.prompt("Enter example number or key (e.g., 3.1 or linear_pipeline)")
+                    choice = (
+                        click.prompt("\nRun a specific example? (y/n/back)")
+                        .lower()
+                        .strip()
+                    )
+                    if choice in ["y", "yes"]:
+                        key = click.prompt(
+                            "Enter example number or key (e.g., 3.1 or linear_pipeline)"
+                        )
                         actual_key = mapping.get(key, key)
                         ctx.invoke(run, example_key=actual_key)
                         input("\nPress Enter to continue...")
                         break
-                    elif choice in ['n', 'no']:
+                    elif choice in ["n", "no"]:
                         break
-                    elif choice == 'back':
+                    elif choice == "back":
                         break
                     else:
                         click.echo("Please enter 'y', 'n', or 'back'")
@@ -753,10 +779,10 @@ def interactive(ctx):
 
         elif choice == 4:
             # Run all examples in a category
-            os.system('clear')
+            os.system("clear")
             ctx.invoke(categories)
             cat = click.prompt("Select category (or 'back' to return)")
-            if cat.lower().strip() == 'back':
+            if cat.lower().strip() == "back":
                 continue
             if cat in registry.list_by_category():
                 ctx.invoke(
@@ -788,7 +814,7 @@ def _display_numbered_examples(registry):
     examples_by_cat = registry.list_by_category()
 
     if not examples_by_cat:
-        click.echo(f"❌ No examples found")
+        click.echo("❌ No examples found")
         return {}
 
     # Difficulty colors
