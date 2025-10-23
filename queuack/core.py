@@ -1320,8 +1320,11 @@ class Worker:
                 # Process completed jobs
                 if futures:
                     try:
+                        # When stopping, wait for all futures without timeout
+                        # When running, use poll_interval timeout
+                        timeout = None if self.should_stop else poll_interval
                         done_futures = list(
-                            as_completed(futures.keys(), timeout=poll_interval)
+                            as_completed(futures.keys(), timeout=timeout)
                         )
 
                         for future in done_futures:
