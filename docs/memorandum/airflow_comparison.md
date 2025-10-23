@@ -587,7 +587,7 @@ def trigger_dag(ctx, dag_name, conf, wait):
         click.echo(f"✓ Triggered DAG '{dag_name}' (run_id: {run_id})")
         
         if wait:
-            from queuack.dag_context import DAGRun
+            from queuack.dag import DAGRun
             dag_run = DAGRun(queue, run_id)
             
             import time
@@ -4092,7 +4092,7 @@ def trigger_dag(ctx, dag_name, conf, wait):
         click.echo(f"✓ Triggered DAG '{dag_name}' (run_id: {run_id})")
         
         if wait:
-            from queuack.dag_context import DAGRun
+            from queuack.dag import DAGRun
             dag_run = DAGRun(queue, run_id)
             
             import time
