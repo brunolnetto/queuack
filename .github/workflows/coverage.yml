@@ -84,14 +84,14 @@ jobs:
 
       - name: Run tests
         # For example, using `pytest`
-        run: python3 -m pytest
+        run: uv run python3 -m pytest
 
       #----------------------------------------------
       #       Test coverage
       #----------------------------------------------
       - name: Run tests and generate coverage
         run: |
-          python3 -m pytest --cov=queuack tests/ --junitxml=junit.xml -o junit_family=legacy
+          uv run python3 -m pytest --cov=queuack tests/ --junitxml=junit.xml -o junit_family=legacy
 
       #----------------------------------------------
       #       Update codecov coverage
