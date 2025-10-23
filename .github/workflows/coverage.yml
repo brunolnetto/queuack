@@ -84,14 +84,14 @@ jobs:
 
       - name: Run tests
         # For example, using `pytest`
-        run: PYTHONPATH=$$(pwd) python3 -m pytest
+        run: python3 -m pytest
 
       #----------------------------------------------
       #       Test coverage
       #----------------------------------------------
       - name: Run tests and generate coverage
         run: |
-          PYTHONPATH=$$(pwd) python3 -m pytest --cov=queuack tests/ --junitxml=junit.xml -o junit_family=legacy
+          python3 -m pytest --cov=queuack tests/ --junitxml=junit.xml -o junit_family=legacy
 
       #----------------------------------------------
       #       Update codecov coverage
