@@ -84,13 +84,11 @@ class DuckQueue:
         self._worker_concurrency = worker_concurrency
         self._poll_timeout = poll_timeout
         self.serialization = serialization
+        self._closed = False
 
         self._enable_claim_cache = enable_claim_cache
-
-        # Cache refresh thread
+        self._cache_refresh_running = False
         self._cache_refresh_thread = None
-        if self._enable_claim_cache:
-            self._start_cache_refresh()
 
         # Create connection pool
         self._conn_pool = ConnectionPool(self.db_path)
@@ -100,7 +98,7 @@ class DuckQueue:
 
         self._db_lock = threading.RLock()
         self._worker_pool = None
-        self._closed = False
+
 
     # Backpressure thresholds are configurable via classmethods so tests
     # or subclasses can override them for faster runs.
@@ -259,22 +257,6 @@ class DuckQueue:
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_job_dependencies_child_parent
             ON job_dependencies(child_job_id, parent_job_id)
-        """)
-
-        # PERFORMANCE OPTIMIZATION 3: Ready jobs cache
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS ready_jobs_cache (
-                job_id VARCHAR PRIMARY KEY,
-                queue VARCHAR NOT NULL,
-                priority INTEGER NOT NULL,
-                created_at TIMESTAMP NOT NULL,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_ready_jobs_queue 
-            ON ready_jobs_cache(queue, priority DESC, created_at)
         """)
 
         # DAG runs table
@@ -573,19 +555,22 @@ For more complex cases, consider using JSON-serializable function references.
     # ========================================================================
 
     def claim(
-        self, queue: str = None, worker_id: str = None, claim_timeout: int = 300
+        self,
+        queue: str = None,
+        worker_id: str = None,
+        claim_timeout: int = 300
     ) -> Optional[Job]:
         """
         Atomically claim next pending job.
-
+        
         Args:
             queue: Queue to claim from (defaults to self.default_queue)
             worker_id: Worker identifier (auto-generated if None)
             claim_timeout: Seconds before claim expires (for stale job recovery)
-
+        
         Returns:
             Job object or None if queue empty
-
+        
         Example:
             while True:
                 job = queue.claim()
@@ -598,25 +583,21 @@ For more complex cases, consider using JSON-serializable function references.
         queue = queue or self.default_queue
         worker_id = worker_id or self._generate_worker_id()
         now = datetime.now()
-
+        
         with self._db_lock:
             # Promote delayed jobs that are ready
-            self.conn.execute(
-                """
+            self.conn.execute("""
                 UPDATE jobs
                 SET status = 'pending'
                 WHERE status = 'delayed'
                 AND execute_after <= ?
-            """,
-                [now],
-            )
-
+            """, [now])
+            
             # Atomic claim with stale job recovery
             # Only claim a job if its dependencies are satisfied based on dependency_mode:
             # - 'all': ALL parents must be 'done'
             # - 'any': AT LEAST ONE parent must be 'done'
-            result = self.conn.execute(
-                """
+            result = self.conn.execute("""
                 UPDATE jobs
                 SET 
                     status = 'claimed',
@@ -662,19 +643,23 @@ For more complex cases, consider using JSON-serializable function references.
                     LIMIT 1
                 )
                 RETURNING *
-            """,
-                [now, worker_id, queue, now - timedelta(seconds=claim_timeout), now],
-            ).fetchone()
-
+            """, [
+                now,
+                worker_id,
+                queue,
+                now - timedelta(seconds=claim_timeout),
+                now
+            ]).fetchone()
+            
             if result is None:
                 return None
-
+            
             # Convert to Job object
             columns = [desc[0] for desc in self.conn.description]
             job_dict = dict(zip(columns, result))
-
+            
             self.logger.info(f"Claimed job {job_dict['id'][:8]} by {worker_id}")
-
+            
             return Job(**job_dict)
 
     def claim_batch(
@@ -784,84 +769,6 @@ For more complex cases, consider using JSON-serializable function references.
 
             self.logger.info(f"Claimed {len(jobs)} jobs by {worker_id}")
             return jobs
-
-    def _start_cache_refresh(self):
-        """Start background thread to refresh ready jobs cache."""
-        self._cache_refresh_running = True
-        self._cache_refresh_thread = threading.Thread(
-            target=self._cache_refresh_loop, daemon=True, name="CacheRefresh"
-        )
-        self._cache_refresh_thread.start()
-
-    def _cache_refresh_loop(self):
-        """Background loop to refresh ready jobs cache."""
-        while self._cache_refresh_running:
-            try:
-                self._refresh_ready_jobs_cache()
-            except Exception as e:
-                self.logger.error(f"Cache refresh error: {e}")
-
-            # Refresh every 5 seconds
-            time.sleep(5)
-
-    def _refresh_ready_jobs_cache(self, queue: str = None):
-        """
-        Refresh cache of jobs ready to claim.
-
-        This pre-computes which jobs are ready, avoiding expensive
-        dependency checks on every claim.
-        """
-        with self._db_lock:
-            # Clear old cache
-            if queue:
-                self.conn.execute(
-                    "DELETE FROM ready_jobs_cache WHERE queue = ?", [queue]
-                )
-            else:
-                self.conn.execute("DELETE FROM ready_jobs_cache")
-
-            # Rebuild cache with jobs that are ready to claim
-            now = datetime.now()
-            self.conn.execute(
-                """
-                INSERT INTO ready_jobs_cache (job_id, queue, priority, created_at)
-                SELECT j.id, j.queue, j.priority, j.created_at
-                FROM jobs j
-                WHERE j.status = 'pending'
-                AND j.attempts < j.max_attempts
-                AND (j.execute_after IS NULL OR j.execute_after <= ?)
-                AND (
-                    -- No dependencies
-                    NOT EXISTS (
-                        SELECT 1 FROM job_dependencies 
-                        WHERE child_job_id = j.id
-                    )
-                    OR
-                    -- All dependencies met (mode='all')
-                    (j.dependency_mode = 'all' AND NOT EXISTS (
-                        SELECT 1 FROM job_dependencies jd
-                        JOIN jobs pj ON jd.parent_job_id = pj.id
-                        WHERE jd.child_job_id = j.id 
-                        AND pj.status != 'done'
-                    ))
-                    OR
-                    -- At least one dependency met (mode='any')
-                    (j.dependency_mode = 'any' AND EXISTS (
-                        SELECT 1 FROM job_dependencies jd
-                        JOIN jobs pj ON jd.parent_job_id = pj.id
-                        WHERE jd.child_job_id = j.id 
-                        AND pj.status = 'done'
-                    ))
-                )
-            """,
-                [now],
-            )
-
-            # Log cache size
-            count = self.conn.execute(
-                "SELECT COUNT(*) FROM ready_jobs_cache"
-            ).fetchone()[0]
-            self.logger.debug(f"Refreshed ready jobs cache: {count} jobs ready")
 
     def ack(self, job_id: str, result: Any = None, error: Optional[str] = None):
         """
@@ -1209,12 +1116,23 @@ For more complex cases, consider using JSON-serializable function references.
 
     def close(self):
         """Close database connections and stop workers."""
+        if self._closed:
+            return
+
+        self._closed = True
+        
+        # Stop cache refresh
+        if self._cache_refresh_thread:
+            self._cache_refresh_running = False
+            self._cache_refresh_thread.join(timeout=5)
+            self._cache_refresh_thread = None
+
         # Stop workers first if they exist
         if self._worker_pool is not None:
             self.stop_workers()
+
         # Close the current thread's connection
         self._conn_pool.close_current()
-        self._closed = True
 
     def dag(
         self,
@@ -1393,15 +1311,15 @@ class Worker:
                     capacity = self.max_jobs_in_flight - len(futures)
                     batch_size = min(self.batch_size, capacity)
 
-                    jobs = self._claim_next_batch(count=batch_size)
-                    if jobs:
-                        for job in jobs:
-                            with lock:
-                                processed += 1
-                                job_num = processed
-
-                            future = executor.submit(self._execute_job, job, job_num)
-                            futures[future] = job.id
+                    job = self._claim_next_job()
+                    
+                    if job:
+                        with lock:
+                            processed += 1
+                            job_num = processed
+                        
+                        future = executor.submit(self._execute_job, job, job_num)
+                        futures[future] = job.id
 
                 # Process completed jobs
                 if futures:

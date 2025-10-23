@@ -1671,12 +1671,19 @@ class TestNewFeaturesIntegration:
 
             time.sleep(0.5)
             job = q.get_job(job_id)
-            assert job.status in [JobStatus.DELAYED.value, JobStatus.PENDING.value]
+            assert job.status in [
+                JobStatus.DELAYED.value, 
+                JobStatus.PENDING.value
+            ]
 
             # Wait longer for worker to process
-            time.sleep(2)  # Increase from 1 to 2
+            time.sleep(1)  # Increase from 1 to 2
             job = q.get_job(job_id)
-            assert job.status in [JobStatus.DONE.value, JobStatus.CLAIMED.value], (
+
+            assert job.status in [
+                JobStatus.DONE.value, 
+                JobStatus.CLAIMED.value
+            ], (
                 f"Expected done/claimed, got {job.status}"
             )
 
@@ -1685,10 +1692,10 @@ class TestNewFeaturesIntegration:
         reset_flaky_counter()
 
         with DuckQueue(":memory:", workers_num=1) as q:
-            job_id = q.enqueue(flaky_task, max_attempts=5)
+            job_id = q.enqueue(flaky_task, max_attempts=2)
 
             # Wait for retries and eventual success
-            time.sleep(3)
+            time.sleep(1)
 
             job = q.get_job(job_id)
             # Should eventually succeed
@@ -1700,7 +1707,9 @@ class TestNewFeaturesIntegration:
 
     def test_batch_enqueue_with_worker_pool(self):
         """Test batch enqueueing works with WorkerPool."""
-        with DuckQueue(":memory:", workers_num=2, worker_concurrency=2) as q:
+        with DuckQueue(
+            ":memory:", workers_num=2, worker_concurrency=2
+        ) as q:
             # Batch enqueue
             jobs = [(add, (i, i), {}) for i in range(20)]
             job_ids = q.enqueue_batch(jobs)
@@ -1821,11 +1830,14 @@ def test_enqueue_persists_dependencies_and_claim_respects_them(queue):
     parent_id = queue.enqueue(parent_func, args=(1, 2), kwargs={})
 
     # Enqueue child that depends on parent
-    child_id = queue.enqueue(child_func, args=(3, 4), kwargs={}, depends_on=parent_id)
+    child_id = queue.enqueue(
+        child_func, args=(3, 4), kwargs={}, depends_on=parent_id
+    )
 
     # The dependency should be persisted in the job_dependencies table
     row = queue.conn.execute(
-        "SELECT parent_job_id FROM job_dependencies WHERE child_job_id = ?", [child_id]
+        "SELECT parent_job_id FROM job_dependencies WHERE child_job_id = ?", 
+        [child_id]
     ).fetchone()
     assert row is not None and row[0] == parent_id
 
@@ -1852,7 +1864,9 @@ def test_ack_propagates_skipped_to_descendants(queue):
     c = queue.enqueue(c_func, args=(), kwargs={}, depends_on=b)
 
     # Force A into permanent failure by setting attempts = max_attempts
-    queue.conn.execute("UPDATE jobs SET attempts = max_attempts WHERE id = ?", [a])
+    queue.conn.execute(
+        "UPDATE jobs SET attempts = max_attempts WHERE id = ?", [a]
+    )
 
     # Ack A with an error to trigger permanent failure handling
     queue.ack(a, error="permanent")
