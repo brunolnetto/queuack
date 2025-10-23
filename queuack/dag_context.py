@@ -25,9 +25,9 @@ import uuid
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from .status import DAGRunStatus, DependencyMode
-from .data_models import JobSpec, DAGValidationError
 from .dag import DAGEngine
+from .data_models import DAGValidationError, JobSpec
+from .status import DAGRunStatus, DependencyMode
 
 # ============================================================================
 # Data Models
@@ -206,7 +206,7 @@ class DAGContext:
             # Store external parents separately on the spec so submit() can insert them
             # without mutating the original human-friendly spec.depends_on.
             if external_parents:
-                setattr(spec, "_external_parents", list(external_parents))
+                spec._external_parents = list(external_parents)
 
         return job_id
 

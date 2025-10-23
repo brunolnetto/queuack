@@ -24,29 +24,30 @@ Run specific test:
     pytest test_duckqueue.py::TestDuckQueue::test_enqueue_basic -v
 """
 
-import pytest
-import time
-import pickle
-import threading
-from datetime import datetime, timedelta
-import tempfile
 import os
+import pickle
 
 # Import from duckqueue module
 # Assuming the module is named 'core' based on your file structure
 import sys
+import tempfile
+import threading
+import time
+from datetime import datetime, timedelta
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from queuack import (
+    BackpressureError,
+    ConnectionPool,
     DuckQueue,
+    Job,
+    JobStatus,
     Worker,
     WorkerPool,
-    ConnectionPool,
-    Job,
     job,
-    JobStatus,
-    BackpressureError,
 )
 
 
@@ -764,8 +765,8 @@ class TestDuckQueue:
         worker_id = queue._generate_worker_id()
         assert worker_id is not None
         assert isinstance(worker_id, str)
-        import socket
         import os
+        import socket
 
         assert socket.gethostname() in worker_id
         assert str(os.getpid()) in worker_id
@@ -1301,19 +1302,28 @@ class TestPerformance:
         assert queue.stats()["pending"] == 100
 
     def test_claim_performance(self, queue: DuckQueue):
-        # Disable backpressure checks for bulk performance enqueues to avoid
-        # noisy warnings during the test. The test measures throughput, not
-        # backpressure behavior.
+        """Test batch claiming performance."""
+        # Enqueue 100 jobs
         for i in range(100):
             queue.enqueue(add, args=(i, i), check_backpressure=False)
 
         start = time.time()
-        for _ in range(100):
-            job = queue.claim()
-            if job:
+
+        # Claim in batches of 10 (10 iterations instead of 100)
+        claimed = 0
+        while claimed < 100:
+            jobs = queue.claim_batch(count=10)
+            for job in jobs:
                 queue.ack(job.id, result=0)
+            claimed += len(jobs)
+
+            if not jobs:
+                break
+
         duration = time.time() - start
-        assert duration < 10.0  # 10 seconds for 100 jobs
+
+        assert claimed == 100
+        assert duration < 2.0
 
 
 # ============================================================================

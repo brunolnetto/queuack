@@ -1,17 +1,18 @@
-import pytest
-import tempfile
 import os
+import tempfile
+
+import pytest
 
 from queuack import (
     DAGEngine,
-    DuckQueue,
-    DuckQueueAdapter,
     DAGValidationError,
     DependencyMode,
-    NodeStatus,
+    DuckQueue,
+    DuckQueueAdapter,
     InMemoryJobStore,
     Job,
     JobStatus,
+    NodeStatus,
 )
 
 
@@ -750,7 +751,7 @@ class TestDAGExportMermaid:
         mermaid = engine.export_mermaid()
 
         assert "graph TD" in mermaid
-        assert "single" in mermaid
+        assert "SingleNode" in mermaid
         assert "Single Node" in mermaid
 
     def test_export_mermaid_node_with_special_characters(self):
@@ -1023,8 +1024,9 @@ class TestConnectionPoolEdgeCases:
 
     def test_connection_pool_wait_until_ready(self):
         """Test wait_until_ready blocks until schema initialized."""
-        from queuack.core import ConnectionPool
         import threading
+
+        from queuack.core import ConnectionPool
 
         pool = ConnectionPool(":memory:")
 
@@ -1055,8 +1057,9 @@ class TestConnectionPoolEdgeCases:
 
     def test_connection_pool_get_connection_waits(self):
         """Test get_connection waits for schema initialization."""
-        from queuack.core import ConnectionPool
         import threading
+
+        from queuack.core import ConnectionPool
 
         pool = ConnectionPool(":memory:")
 

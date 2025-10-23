@@ -11,13 +11,13 @@ We'll leverage NetworkX for battle-tested graph algorithms rather than
 reimplementing everything from scratch.
 """
 
-from typing import Dict, List, Set, Any, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import networkx as nx
 
-from .job_store import JobStore
-from .status import NodeStatus, DependencyMode
 from .data_models import DAGNode, DAGValidationError
+from .job_store import JobStore
+from .status import DependencyMode, NodeStatus
 
 
 class DAGEngine:
@@ -365,11 +365,9 @@ class DAGEngine:
 
             lines.append(f'    {mermaid_id}["{label}"]{style}')
 
-        # Add edges using mapped IDs
+        # Add edges using original node IDs
         for parent, child in self.graph.edges:
-            parent_id = id_mapping.get(parent, parent)
-            child_id = id_mapping.get(child, child)
-            lines.append(f"    {parent_id} --> {child_id}")
+            lines.append(f"    {parent} --> {child}")
 
         # Add style definitions
         lines.extend(

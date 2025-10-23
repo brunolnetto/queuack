@@ -1,16 +1,17 @@
-import pytest
+import os
 import tempfile
 from datetime import datetime
-import os
+
+import pytest
 
 from queuack import (
-    DuckQueue,
-    JobStatus,
-    DuckQueueAdapter,
     DAGEngine,
     DAGValidationError,
+    DuckQueue,
+    DuckQueueAdapter,
     InMemoryJobStore,
     Job,
+    JobStatus,
 )
 
 

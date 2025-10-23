@@ -3,10 +3,10 @@
 import pytest
 
 from queuack import (
-    job_status_to_node_status,
-    node_status_to_job_status,
     JobStatus,
     NodeStatus,
+    job_status_to_node_status,
+    node_status_to_job_status,
 )
 
 

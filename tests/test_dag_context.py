@@ -10,16 +10,17 @@ Tests cover:
 - Atomic submission and rollback
 """
 
-import pytest
 import time
 
+import pytest
+
 from queuack import (
-    DuckQueue,
     DAGContext,
     DAGRun,
     DAGRunStatus,
-    DependencyMode,
     DAGValidationError,
+    DependencyMode,
+    DuckQueue,
 )
 
 

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Protocol, Optional, Iterable, Dict, Any, List
+from collections.abc import Iterable
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Protocol
 
-from .status import JobStatus
 from .data_models import Job
+from .status import JobStatus
 
 
 class JobStore(Protocol):
@@ -41,7 +42,7 @@ class InMemoryJobStore:
     Job instance fields.
     """
 
-    def __init__(self, jobs: Optional[Iterable["Job"]] = None):
+    def __init__(self, jobs: Optional[Iterable[Job]] = None):
         self._jobs: Dict[str, Job] = {}
         if jobs:
             for j in jobs:

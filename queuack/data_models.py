@@ -51,16 +51,13 @@ and mutable defaults). For schema-level documentation see the SQL
 schema in ``queuack.core`` where the ``jobs`` table is created.
 """
 
-import pickle
 import logging
-from dataclasses import dataclass
+import pickle
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Any
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from dataclasses import field
-from typing import Callable, Tuple, Dict, List, Union
-
-from .status import NodeStatus, DependencyMode
+from .status import DependencyMode, NodeStatus
 
 logger = logging.getLogger(__name__)
 

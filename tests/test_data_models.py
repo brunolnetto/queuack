@@ -1,10 +1,11 @@
 # file: test_data_models.py
 
 import pickle
+
 import pytest
 
+from queuack.data_models import BackpressureError, Job
 from queuack.status import JobStatus
-from queuack.data_models import Job, BackpressureError
 
 
 # Test functions (must be at module level to be picklable)
