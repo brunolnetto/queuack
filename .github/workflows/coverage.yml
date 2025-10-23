@@ -84,17 +84,14 @@ jobs:
 
       - name: Run tests
         # For example, using `pytest`
-        run: uv run pytest tests
+        run: PYTHONPATH=$$(pwd) python3 -m pytest
 
       #----------------------------------------------
       #       Test coverage
       #----------------------------------------------
       - name: Run tests and generate coverage
         run: |
-          uv run pytest --cov=queuack tests/
-
-          # Uncomment when achieve sufficient coverage threshold
-          uv run coverage report -m
+          PYTHONPATH=$$(pwd) python3 -m pytest --cov=queuack tests/ --junitxml=junit.xml -o junit_family=legacy
 
       #----------------------------------------------
       #       Update codecov coverage
