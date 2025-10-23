@@ -1,3 +1,8 @@
+.vscode
+codecov
+uv.lock
+.python_version
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -46,9 +51,12 @@ htmlcov/
 nosetests.xml
 coverage.xml
 *.cover
-*.py.cover
+*.py,cover
 .hypothesis/
 .pytest_cache/
+
+# Example output files
+results/
 cover/
 
 # Translations

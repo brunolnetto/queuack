@@ -1,4 +1,4 @@
-.PHONY: help clean test coverage docs servedocs install bump publish release
+.PHONY: help clean test coverage docs servedocs install bump publish release examples
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
@@ -37,12 +37,10 @@ SPHINXBUILD   = python3 -msphinx
 PACKAGE_NAME = "queuack"
 PACKAGE_VERSION := $(shell python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
 
-COVERAGE_IGNORE_PATHS = "eule/examples"
+COVERAGE_IGNORE_PATHS = "examples/,tests/,queuack/__init__.py"
 
 help:
 	@python -c "$$PRINT_HELP_PYSCRIPT" < $(MAKEFILE_LIST)
-
-clean: clean-build clean-pyc clean-test clean-cache ## remove all build, test, coverage, Python artifacts, cache and docs
 
 clean-build: # remove build artifacts
 	rm -fr build/ dist/ .eggs/
@@ -57,18 +55,40 @@ clean-test: # remove test and coverage artifacts
 clean-cache: # remove test and coverage artifacts
 	find . -name '*pycache*' -exec rm -rf {} +
 
-test: ## run tests quickly with the default Python
-	pytest
+clean: clean-build clean-pyc clean-test clean-cache ## remove all build, test, coverage, Python artifacts, cache and docs
+	@echo "Cleaned all artifacts! 🧹"
+
+test: clean ## run tests quickly with the default Python
+	PYTHONPATH=$$(pwd) python3 -m pytest --durations=20 --durations-min=1
+	@echo "Tests completed! ✅"
+
+cov: clean ## check code coverage quickly with the default Python
+	PYTHONPATH=$$(pwd) python3 -m pytest --cov=queuack --cov-report=term-missing --durations=20 --durations-min=1
+	@echo "Coverage tests completed! ✅"
 
 watch: ## run tests on watchdog mode
-	ptw .
+	PYTHONPATH=$$(pwd) ptw queuack tests -- --maxfail=1 -q --disable-warnings
 
 lint: clean ## perform inplace lint fixes
 	uv run ruff check --fix .
+	@echo "Linting completed! ✅"
 
-cov: clean ## check code coverage quickly with the default Python
-	uv run coverage run --source "$$PACKAGE_NAME" -m pytest
-	uv run coverage report -m --omit="$$COVERAGE_IGNORE_PATHS"
+format: ## format code with ruff
+	uv run ruff format .
+	@echo "Code formatted! ✅"
+
+type: clean ## perform type checking
+	uv run ty check .
+	@echo "Type checking completed! ✅"
+
+check: clean lint type ## run all code quality checks
+	make lint
+	make type
+	@echo "All checks passed! ✅"
+
+examples: ## run the examples interactive mode (access all commands)
+	PYTHONPATH=$$(pwd) python3 scripts/run_examples.py interactive
+	@echo "Examples completed! 🦆"
 
 env: ## Creates a virtual environment. Usage: make env
 	uv venv
@@ -81,7 +101,7 @@ what: ## List all commits made since last version bump
 
 check-bump: # check if bump version is valid
 	@if [ "$(v)" != "patch" ] && [ "$(v)" != "minor" ] && [ "$(v)" != "major" ]; then \
-		echo "Invalid input for 'v': $(v). Please use 'patch', 'minor', or 'major'."; \
+		echo "Invalid version bump '$(v)'. Use 'patch', 'minor', or 'major'.";
 		exit 1; \
 	fi; \
 
@@ -93,11 +113,14 @@ bump: ## bump version to user-provided {patch|minor|major} semantic
 	git tag "v$(PACKAGE_VERSION)"
 	git push
 	git push --tags
+	@echo "Bumped version to $(PACKAGE_VERSION)! 🎉"
 
 publish: clean ## build source and publish package
 	uv build
 	uv publish
+	@echo "Published package $(PACKAGE_NAME) version $(PACKAGE_VERSION)! 🚀"
 
 release: ## release package on PyPI
 	$(MAKE) bump v=$(v)
 	$(MAKE) publish
+	@echo "Released package $(PACKAGE_NAME) version $(PACKAGE_VERSION)! 🚀"

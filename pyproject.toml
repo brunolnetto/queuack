@@ -4,29 +4,70 @@ version = "0.1.1"
 description = "A DuckDB-based queue manager"
 readme = "README.md"
 requires-python = ">=3.9"
+
 dependencies = [
-    "duckdb>=1.4.1",
-]
+  "duckdb>=1.4.1",
+  "networkx>=3.2.1",
+  "cloudpickle>=3.1.1"]
 
 [dependency-groups]
+test = [
+"pytest>=8.4.2",
+"pytest-cov>=7.0.0",
+"pytest-watch>=4.2.0",]
+
+lint = [
+"ruff>=0.14.1",
+"toml-sort>=0.24.3",]
+
+web = [
+"fastapi>=0.119.1",
+"flask>=3.1.2",
+"uvicorn>=0.38.0",
+"websockets>=15.0.1",
+"flask-socketio>=5.5.1",]
+
+data = [
+"pandas>=2.3.3",]
+
+imaging = [
+"pillow>=11.3.0",]
+
 dev = [
-    "pytest>=8.4.2",
-    "pytest-cov>=7.0.0",
-    "ruff>=0.14.1",
-]
+"click>=8.1.8",
+"requests>=2.32.5",
+"tabulate>=0.9.0",]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+  "E", # pycodestyle errors
+  "W", # pycodestyle warnings
+  "F", # pyflakes
+  "I", # isort
+  "B", # flake8-bugbear
+  "C4", # flake8-comprehensions
+  "UP"] # pyupgrade
+ignore = [
+  "E501", # line too long, handled by formatter
+  "B008", # do not perform function calls in argument defaults
+  "C901"] # too complex
+
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"] # assert False
+"examples/*" = ["T201", "T203"] # print statements in examples
 
 [tool.setuptools.packages.find]
 include = ["queuack"]
 exclude = ["images"]
 
 [tool.tox]
-envlist = ["py39"]
+envlist = ["py311"]
 
-[tool.tox.testenv.py39]
-deps = [
-    "pytest",
-    "pytest-cov",
-]
-commands = [
-    "pytest --cov=queuack",
-]
+[tool.tox.env.py311]
+deps = ["pytest", "pytest-cov"]
+commands = [["pytest", "--cov=queuack"]]
