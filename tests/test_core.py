@@ -1293,6 +1293,20 @@ class TestEdgeCases:
 class TestPerformance:
     """Performance-related tests."""
 
+    @pytest.fixture
+    def queue(self):
+        """Create in-memory queue for testing."""
+        queue = DuckQueue(":memory:", enable_claim_cache=True)
+        yield queue
+        queue.close()
+
+    @pytest.fixture
+    def queue_no_cache(self):
+        """Create queue without cache for baseline tests."""
+        queue = DuckQueue(":memory:", enable_claim_cache=False)
+        yield queue
+        queue.close()
+
     def test_enqueue_performance(self, queue: DuckQueue):
         start = time.time()
         for i in range(100):
@@ -1301,9 +1315,9 @@ class TestPerformance:
         assert duration < 5.0  # 5 seconds for 100 jobs
         assert queue.stats()["pending"] == 100
 
-    def test_claim_performance(self, queue: DuckQueue):
-        """Test batch claiming performance."""
-        # Enqueue 100 jobs
+    def test_claim_batch_performance(self, queue: DuckQueue):
+        """Test batch claiming performance (fastest method)."""
+        # Enqueue 100 jobs without dependencies
         for i in range(100):
             queue.enqueue(add, args=(i, i), check_backpressure=False)
 
@@ -1314,7 +1328,8 @@ class TestPerformance:
         while claimed < 100:
             jobs = queue.claim_batch(count=10)
             for job in jobs:
-                queue.ack(job.id, result=0)
+                result = job.execute()
+                queue.ack(job.id, result=result)
             claimed += len(jobs)
 
             if not jobs:
@@ -1323,7 +1338,42 @@ class TestPerformance:
         duration = time.time() - start
 
         assert claimed == 100
-        assert duration < 10.0
+        assert duration < 2.0, f"Batch claiming took {duration:.2f}s (expected <2s)"
+        print(
+            f"✓ Batch claim: {duration:.2f}s for 100 jobs ({100 / duration:.0f} jobs/s)"
+        )
+
+    def test_claim_batch_with_dependencies(self, queue: DuckQueue):
+        """Test batch claiming respects dependencies."""
+        # Create dependency chain: job1 -> job2 -> job3
+        job1_id = queue.enqueue(add, args=(1, 1), check_backpressure=False)
+        job2_id = queue.enqueue(
+            add, args=(2, 2), depends_on=job1_id, check_backpressure=False
+        )
+        job3_id = queue.enqueue(
+            add, args=(3, 3), depends_on=job2_id, check_backpressure=False
+        )
+
+        # Batch claim should only get job1 (no dependencies)
+        batch1 = queue.claim_batch(count=10)
+        assert len(batch1) == 1
+        assert batch1[0].id == job1_id
+
+        # Complete job1
+        queue.ack(job1_id, result=2)
+
+        # Now job2 should be available
+        batch2 = queue.claim_batch(count=10)
+        assert len(batch2) == 1
+        assert batch2[0].id == job2_id
+
+        # Complete job2
+        queue.ack(job2_id, result=4)
+
+        # Now job3 should be available
+        batch3 = queue.claim_batch(count=10)
+        assert len(batch3) == 1
+        assert batch3[0].id == job3_id
 
 
 # ============================================================================

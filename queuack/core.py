@@ -69,6 +69,7 @@ class DuckQueue:
         poll_timeout: float = 1.0,
         logger: Optional[logging.Logger] = None,
         serialization: str = "pickle",  # "pickle" or "json_ref"
+        enable_claim_cache: bool = True,
     ):
         """Initialize queue with schema creation."""
         if workers_num is not None and workers_num <= 0:
@@ -82,6 +83,14 @@ class DuckQueue:
         self._workers_num = workers_num
         self._worker_concurrency = worker_concurrency
         self._poll_timeout = poll_timeout
+        self.serialization = serialization
+
+        self._enable_claim_cache = enable_claim_cache
+
+        # Cache refresh thread
+        self._cache_refresh_thread = None
+        if self._enable_claim_cache:
+            self._start_cache_refresh()
 
         # Create connection pool
         self._conn_pool = ConnectionPool(self.db_path)
@@ -216,16 +225,17 @@ class DuckQueue:
 
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_jobs_claim 
-            ON jobs(queue, status, priority DESC, execute_after, created_at)
+            ON jobs(queue, status, priority DESC, created_at, attempts, max_attempts, execute_after)
         """)
 
+        # Dead letter queue view
         conn.execute("""
             CREATE VIEW IF NOT EXISTS dead_letter_queue AS
             SELECT * FROM jobs 
             WHERE status = 'failed' AND attempts >= max_attempts
         """)
 
-        # Dependency table for DAG support (Phase 1)
+        # Dependency table for DAG support
         conn.execute("""
             CREATE TABLE IF NOT EXISTS job_dependencies (
                 child_job_id VARCHAR NOT NULL,
@@ -234,13 +244,38 @@ class DuckQueue:
             )
         """)
 
-        # Indexes to speed up recursive traversal queries over dependencies
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_job_dependencies_parent ON job_dependencies(parent_job_id)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_job_dependencies_child ON job_dependencies(child_job_id)"
-        )
+        # Better dependency indexes
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_job_dependencies_parent 
+            ON job_dependencies(parent_job_id)
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_job_dependencies_child 
+            ON job_dependencies(child_job_id)
+        """)
+
+        # Composite index for dependency checks with status
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_job_dependencies_child_parent
+            ON job_dependencies(child_job_id, parent_job_id)
+        """)
+
+        # PERFORMANCE OPTIMIZATION 3: Ready jobs cache
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ready_jobs_cache (
+                job_id VARCHAR PRIMARY KEY,
+                queue VARCHAR NOT NULL,
+                priority INTEGER NOT NULL,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ready_jobs_queue 
+            ON ready_jobs_cache(queue, priority DESC, created_at)
+        """)
 
         # DAG runs table
         conn.execute(
@@ -258,12 +293,30 @@ class DuckQueue:
         )
 
         # Indexes for DAG queries
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_dag_runs_name ON dag_runs(name)")
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_dag_runs_status ON dag_runs(status)"
+            """
+            CREATE INDEX IF NOT EXISTS idx_dag_runs_name 
+            ON dag_runs(name)
+            """
         )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_dag_run ON jobs(dag_run_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_node_name ON jobs(node_name)")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_dag_runs_status 
+            ON dag_runs(status)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_jobs_dag_run 
+            ON jobs(dag_run_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_jobs_node_name 
+            ON jobs(node_name)
+            """
+        )
 
         # Statistics view
         conn.execute(
@@ -732,6 +785,84 @@ For more complex cases, consider using JSON-serializable function references.
             self.logger.info(f"Claimed {len(jobs)} jobs by {worker_id}")
             return jobs
 
+    def _start_cache_refresh(self):
+        """Start background thread to refresh ready jobs cache."""
+        self._cache_refresh_running = True
+        self._cache_refresh_thread = threading.Thread(
+            target=self._cache_refresh_loop, daemon=True, name="CacheRefresh"
+        )
+        self._cache_refresh_thread.start()
+
+    def _cache_refresh_loop(self):
+        """Background loop to refresh ready jobs cache."""
+        while self._cache_refresh_running:
+            try:
+                self._refresh_ready_jobs_cache()
+            except Exception as e:
+                self.logger.error(f"Cache refresh error: {e}")
+
+            # Refresh every 5 seconds
+            time.sleep(5)
+
+    def _refresh_ready_jobs_cache(self, queue: str = None):
+        """
+        Refresh cache of jobs ready to claim.
+
+        This pre-computes which jobs are ready, avoiding expensive
+        dependency checks on every claim.
+        """
+        with self._db_lock:
+            # Clear old cache
+            if queue:
+                self.conn.execute(
+                    "DELETE FROM ready_jobs_cache WHERE queue = ?", [queue]
+                )
+            else:
+                self.conn.execute("DELETE FROM ready_jobs_cache")
+
+            # Rebuild cache with jobs that are ready to claim
+            now = datetime.now()
+            self.conn.execute(
+                """
+                INSERT INTO ready_jobs_cache (job_id, queue, priority, created_at)
+                SELECT j.id, j.queue, j.priority, j.created_at
+                FROM jobs j
+                WHERE j.status = 'pending'
+                AND j.attempts < j.max_attempts
+                AND (j.execute_after IS NULL OR j.execute_after <= ?)
+                AND (
+                    -- No dependencies
+                    NOT EXISTS (
+                        SELECT 1 FROM job_dependencies 
+                        WHERE child_job_id = j.id
+                    )
+                    OR
+                    -- All dependencies met (mode='all')
+                    (j.dependency_mode = 'all' AND NOT EXISTS (
+                        SELECT 1 FROM job_dependencies jd
+                        JOIN jobs pj ON jd.parent_job_id = pj.id
+                        WHERE jd.child_job_id = j.id 
+                        AND pj.status != 'done'
+                    ))
+                    OR
+                    -- At least one dependency met (mode='any')
+                    (j.dependency_mode = 'any' AND EXISTS (
+                        SELECT 1 FROM job_dependencies jd
+                        JOIN jobs pj ON jd.parent_job_id = pj.id
+                        WHERE jd.child_job_id = j.id 
+                        AND pj.status = 'done'
+                    ))
+                )
+            """,
+                [now],
+            )
+
+            # Log cache size
+            count = self.conn.execute(
+                "SELECT COUNT(*) FROM ready_jobs_cache"
+            ).fetchone()[0]
+            self.logger.debug(f"Refreshed ready jobs cache: {count} jobs ready")
+
     def ack(self, job_id: str, result: Any = None, error: Optional[str] = None):
         """
         Acknowledge job completion.
@@ -1153,6 +1284,7 @@ class Worker:
         worker_id: str = None,
         concurrency: int = 1,
         max_jobs_in_flight: int = None,
+        batch_size: int = 5,
     ):
         """
         Initialize worker.
@@ -1170,6 +1302,7 @@ class Worker:
         self.worker_id = worker_id or queue._generate_worker_id()
         self.concurrency = concurrency
         self.max_jobs_in_flight = max_jobs_in_flight or (concurrency * 2)
+        self.batch_size = batch_size
         self.should_stop = False
         self.jobs_in_flight = 0
 
@@ -1256,15 +1389,19 @@ class Worker:
             while not self.should_stop or futures:
                 # Backpressure: Stop claiming if too many jobs in flight
                 if len(futures) < self.max_jobs_in_flight and not self.should_stop:
-                    job = self._claim_next_job()
+                    # Calculate how many jobs we can accept
+                    capacity = self.max_jobs_in_flight - len(futures)
+                    batch_size = min(self.batch_size, capacity)
 
-                    if job:
-                        with lock:
-                            processed += 1
-                            job_num = processed
+                    jobs = self._claim_next_batch(count=batch_size)
+                    if jobs:
+                        for job in jobs:
+                            with lock:
+                                processed += 1
+                                job_num = processed
 
-                        future = executor.submit(self._execute_job, job, job_num)
-                        futures[future] = job.id
+                            future = executor.submit(self._execute_job, job, job_num)
+                            futures[future] = job.id
 
                 # Process completed jobs
                 if futures:
@@ -1290,6 +1427,20 @@ class Worker:
         self.logger.info(
             f"Worker {self.worker_id} stopped (processed {processed} jobs)"
         )
+
+    def _claim_next_batch(self, count: int = None) -> List[Job]:
+        """Claim batch of jobs from highest-priority queue."""
+        if count is None:
+            count = self.batch_size
+
+        for queue_name, _ in self.queues:
+            jobs = self.queue.claim_batch(
+                count=count, queue=queue_name, worker_id=self.worker_id
+            )
+            if jobs:
+                return jobs
+
+        return []
 
     def _claim_next_job(self) -> Optional[Job]:
         """Claim next job from highest-priority queue."""
