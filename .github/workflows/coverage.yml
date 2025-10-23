@@ -69,11 +69,10 @@ jobs:
           # Install a specific version of uv.
           version: "0.9.4"
 
-      - name: Set up Python
-        run: uv python install
-
-      - name: Install the project
-        run: uv sync --group test
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
 
       #----------------------------------------------
       #       install dependencies if cache does not exist
@@ -83,6 +82,9 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --group test
 
       - name: Run tests
         # For example, using `pytest`
