@@ -73,7 +73,7 @@ jobs:
         run: uv python install
 
       - name: Install the project
-        run: uv sync --all-extras --dev
+        run: uv sync --group test
 
       #----------------------------------------------
       #       install dependencies if cache does not exist
