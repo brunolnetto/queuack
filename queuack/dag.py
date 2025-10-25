@@ -47,7 +47,6 @@ def _subdag_sentinel(dag_run_id: str, queue_path: str):
     executed it resolves the correct queue (preferring the thread-local
     queue for in-memory databases) and checks the DAG run status.
     """
-    import threading
 
     from .core import DuckQueue
 
@@ -65,8 +64,8 @@ def _subdag_sentinel(dag_run_id: str, queue_path: str):
         if status == DAGRunStatus.FAILED:
             raise RuntimeError(
                 f"Sub-DAG failed (run_id={dag_run_id}): "
-                f"{progress.get('done',0)}/{sum(progress.values())} done, "
-                f"{progress.get('failed',0)} failed"
+                f"{progress.get('done', 0)}/{sum(progress.values())} done, "
+                f"{progress.get('failed', 0)} failed"
             )
 
         return dag_run_id
@@ -509,10 +508,10 @@ class SubDAGExecutor:
 
     def __init__(
         self,
-        dag_factory: Callable[[str], 'DAG'],
+        dag_factory: Callable[[str], "DAG"],
         queue_path: str,
         poll_interval: float = 1.0,
-        timeout: Optional[float] = None
+        timeout: Optional[float] = None,
     ):
         self.dag_factory = dag_factory
         self.queue_path = queue_path
@@ -521,13 +520,13 @@ class SubDAGExecutor:
 
     @property
     def __name__(self) -> str:
-        factory_name = getattr(self.dag_factory, '__name__', 'unknown')
+        factory_name = getattr(self.dag_factory, "__name__", "unknown")
         return f"SubDAGExecutor({factory_name})"
 
     def __call__(self, parent_job_id: str = None):
         """
         Submit sub-DAG and create sentinel job for completion tracking.
-        
+
         Returns the sub-DAG run_id immediately without blocking.
         """
         from .core import DuckQueue
@@ -590,6 +589,7 @@ class SubDAGExecutor:
 
             # CRITICAL FIX: Reserve sentinel ID BEFORE rewiring
             import uuid
+
             sentinel_id = str(uuid.uuid4())
 
             # CRITICAL FIX: Rewire dependencies BEFORE enqueuing sentinel
@@ -609,12 +609,15 @@ class SubDAGExecutor:
                 except Exception as e:
                     # Log but don't crash - downstream behavior may differ
                     try:
-                        queue.logger.warning(f"Failed to rewire dependencies for sub-DAG: {e}")
+                        queue.logger.warning(
+                            f"Failed to rewire dependencies for sub-DAG: {e}"
+                        )
                     except Exception:
                         pass
 
             # Now enqueue sentinel with pre-allocated ID and rewired dependencies
             import pickle
+
             now = datetime.now()
 
             # Manually insert job with pre-allocated ID
@@ -632,13 +635,13 @@ class SubDAGExecutor:
                         pickle.dumps((run_id, self.queue_path)),
                         pickle.dumps({}),
                         queue.default_queue,
-                        'pending',
+                        "pending",
                         100,  # High priority
                         now,
                         now,
                         3,
                         300,
-                    ]
+                    ],
                 )
 
                 # Add dependencies: sentinel depends on all sub-DAG jobs
@@ -649,7 +652,7 @@ class SubDAGExecutor:
                         INSERT INTO job_dependencies (child_job_id, parent_job_id)
                         VALUES (?, ?)
                         """,
-                        dep_rows
+                        dep_rows,
                     )
 
                 conn.commit()
@@ -659,12 +662,15 @@ class SubDAGExecutor:
                 dag_run = DAGRun(queue, run_id)
 
                 import time as _time
+
                 try:
                     fast_mode = bool(int(os.getenv("QUEUACK_FAST_TESTS", "0")))
                 except Exception:
                     fast_mode = False
 
-                effective_poll = min(self.poll_interval, 0.01) if fast_mode else self.poll_interval
+                effective_poll = (
+                    min(self.poll_interval, 0.01) if fast_mode else self.poll_interval
+                )
 
                 while not dag_run.is_complete():
                     j = queue.claim()
@@ -685,8 +691,8 @@ class SubDAGExecutor:
                     progress = dag_run.get_progress()
                     raise RuntimeError(
                         f"Sub-DAG '{dag.name}' failed. "
-                        f"Progress: {progress.get('done',0)}/{sum(progress.values())} jobs completed, "
-                        f"{progress.get('failed',0)} failed"
+                        f"Progress: {progress.get('done', 0)}/{sum(progress.values())} jobs completed, "
+                        f"{progress.get('failed', 0)} failed"
                     )
 
             return sentinel_id
@@ -902,7 +908,11 @@ class DAGContext:
             # Resolve dependencies
             depends_on_ids = []
             if spec.depends_on:
-                dep_list = [spec.depends_on] if isinstance(spec.depends_on, str) else spec.depends_on
+                dep_list = (
+                    [spec.depends_on]
+                    if isinstance(spec.depends_on, str)
+                    else spec.depends_on
+                )
                 for dep in dep_list:
                     if dep in self.jobs:
                         depends_on_ids.append(self.jobs[dep])
@@ -938,22 +948,24 @@ class DAGContext:
             if kwargs_key not in pickled_kwargs_cache:
                 pickled_kwargs_cache[kwargs_key] = pickle.dumps(spec.kwargs)
 
-            job_rows.append((
-                job_id,
-                pickled_func_cache[func_key],
-                pickled_args_cache[args_key],
-                pickled_kwargs_cache[kwargs_key],
-                self.queue.default_queue,
-                "pending",
-                spec.priority,
-                created_at_now,
-                created_at_now,
-                spec.max_attempts,
-                spec.timeout_seconds,
-                self.dag_run_id,
-                spec.name,
-                spec.dependency_mode.value,
-            ))
+            job_rows.append(
+                (
+                    job_id,
+                    pickled_func_cache[func_key],
+                    pickled_args_cache[args_key],
+                    pickled_kwargs_cache[kwargs_key],
+                    self.queue.default_queue,
+                    "pending",
+                    spec.priority,
+                    created_at_now,
+                    created_at_now,
+                    spec.max_attempts,
+                    spec.timeout_seconds,
+                    self.dag_run_id,
+                    spec.name,
+                    spec.dependency_mode.value,
+                )
+            )
 
             # Add dependency rows
             for parent_id in depends_on_ids:
@@ -994,6 +1006,7 @@ class DAGContext:
             warnings = self.validate()
             if warnings:
                 import warnings as warn_module
+
                 for warning in warnings:
                     warn_module.warn(f"DAG '{self.name}': {warning}")
 
@@ -1103,7 +1116,9 @@ class DAGContext:
                 finally:
                     # Drop unique temp table
                     try:
-                        self.queue.conn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
+                        self.queue.conn.execute(
+                            f"DROP TABLE IF EXISTS {temp_table_name}"
+                        )
                     except Exception:
                         pass
 
@@ -1273,24 +1288,23 @@ class DAGRun:
                 [final_status.value, datetime.now(), self.dag_run_id],
             )
 
-    def get_subdags(self) -> List['DAGRun']:
+    def get_subdags(self) -> List["DAGRun"]:
         """
         Get all sub-DAG runs created by jobs in this DAG.
-        
+
         Returns:
             List of DAGRun instances for child DAGs
-        
+
         Example:
             main_run = DAGRun(queue, main_dag_run_id)
-            
+
             for sub in main_run.get_subdags():
                 print(f"Sub-DAG: {sub.get_status()}")
         """
         with self.queue.connection_context() as conn:
             # Find all jobs in this DAG
             job_ids = conn.execute(
-                "SELECT id FROM jobs WHERE dag_run_id = ?",
-                [self.dag_run_id]
+                "SELECT id FROM jobs WHERE dag_run_id = ?", [self.dag_run_id]
             ).fetchall()
             conn.commit()
 
@@ -1298,14 +1312,14 @@ class DAGRun:
                 return []
 
             # Find DAG runs created by these jobs
-            placeholders = ','.join('?' * len(job_ids))
+            placeholders = ",".join("?" * len(job_ids))
             sub_runs = conn.execute(
                 f"""
                 SELECT id FROM dag_runs
                 WHERE parent_job_id IN ({placeholders})
                 ORDER BY created_at
                 """,
-                [jid[0] for jid in job_ids]
+                [jid[0] for jid in job_ids],
             ).fetchall()
             conn.commit()
 
@@ -1314,13 +1328,12 @@ class DAGRun:
     def get_parent_job(self) -> Optional[str]:
         """
         Get parent job ID if this is a sub-DAG.
-        
+
         Returns:
             Parent job ID or None if this is a top-level DAG
         """
         result = self.queue.conn.execute(
-            "SELECT parent_job_id FROM dag_runs WHERE id = ?",
-            [self.dag_run_id]
+            "SELECT parent_job_id FROM dag_runs WHERE id = ?", [self.dag_run_id]
         ).fetchone()
 
         return result[0] if result and result[0] else None
@@ -1328,10 +1341,10 @@ class DAGRun:
     def get_hierarchy(self) -> Dict[str, Any]:
         """
         Get complete hierarchy including all sub-DAGs.
-        
+
         Returns:
             Nested dict representing the execution tree
-        
+
         Example:
             hierarchy = main_run.get_hierarchy()
             # {
@@ -1347,20 +1360,19 @@ class DAGRun:
         # Get this DAG's info
         with self.queue.connection_context() as conn:
             dag_info = conn.execute(
-                "SELECT name, status FROM dag_runs WHERE id = ?",
-                [self.dag_run_id]
+                "SELECT name, status FROM dag_runs WHERE id = ?", [self.dag_run_id]
             ).fetchone()
 
         hierarchy = {
-            'dag_run_id': self.dag_run_id,
-            'name': dag_info[0] if dag_info else 'unknown',
-            'status': dag_info[1] if dag_info else 'unknown',
-            'subdags': []
+            "dag_run_id": self.dag_run_id,
+            "name": dag_info[0] if dag_info else "unknown",
+            "status": dag_info[1] if dag_info else "unknown",
+            "subdags": [],
         }
 
         # Recursively get sub-DAGs
         for sub in self.get_subdags():
-            hierarchy['subdags'].append(sub.get_hierarchy())
+            hierarchy["subdags"].append(sub.get_hierarchy())
 
         return hierarchy
 
@@ -1368,11 +1380,11 @@ class DAGRun:
 class DAG:
     """
     A directed acyclic graph of jobs.
-    
+
     The primary API for building complex workflows with dependency management.
     Provides a clean, symmetric interface to DuckQueue for orchestrating
     multi-step data pipelines, ETL workflows, and batch processing.
-    
+
     Key Features:
     - Named jobs with dependency tracking
     - Automatic cycle detection
@@ -1380,61 +1392,61 @@ class DAG:
     - Failure propagation with skip semantics
     - Status tracking and progress monitoring
     - Mermaid diagram export for visualization
-    
+
     Example - Basic Pipeline:
         queue = DuckQueue("jobs.db")
         dag = DAG("etl_pipeline", queue)
-        
+
         # Build workflow
         extract = dag.add_job(extract_data, name="extract")
         transform = dag.add_job(
-            transform_data, 
-            name="transform", 
+            transform_data,
+            name="transform",
             depends_on="extract"
         )
         load = dag.add_job(
-            load_data, 
-            name="load", 
+            load_data,
+            name="load",
             depends_on="transform"
         )
-        
+
         # Submit and monitor
         dag.submit()
         print(f"Status: {dag.status}")
         print(f"Progress: {dag.progress}")
-        
+
         # Wait for completion
         while not dag.is_complete():
             time.sleep(1)
-    
+
     Example - Parallel Processing:
         dag = DAG("parallel_etl", queue)
-        
+
         # Single extract
         extract = dag.add_job(extract_data, name="extract")
-        
+
         # Parallel transforms
         t1 = dag.add_job(transform_type_a, name="transform_a", depends_on="extract")
         t2 = dag.add_job(transform_type_b, name="transform_b", depends_on="extract")
         t3 = dag.add_job(transform_type_c, name="transform_c", depends_on="extract")
-        
+
         # Combined load (waits for all transforms)
         load = dag.add_job(
-            load_all, 
-            name="load", 
+            load_all,
+            name="load",
             depends_on=["transform_a", "transform_b", "transform_c"]
         )
-        
+
         dag.submit()
-    
+
     Example - ANY Dependency Mode:
         # Run downstream job if ANY upstream source succeeds
         dag = DAG("multi_source", queue)
-        
+
         api1 = dag.add_job(fetch_api_1, name="api1")
         api2 = dag.add_job(fetch_api_2, name="api2")
         api3 = dag.add_job(fetch_api_3, name="api3")
-        
+
         # Process runs if ANY API call succeeds
         process = dag.add_job(
             process_data,
@@ -1442,15 +1454,15 @@ class DAG:
             depends_on=["api1", "api2", "api3"],
             dependency_mode=DependencyMode.ANY
         )
-        
+
         dag.submit()
-    
+
     Example - Context Manager:
         with DAG("auto_submit", queue) as dag:
             dag.add_job(task1, name="t1")
             dag.add_job(task2, name="t2", depends_on="t1")
         # Auto-submitted on exit
-    
+
     Attributes:
         name: Human-readable DAG name
         queue: Associated DuckQueue instance
@@ -1470,7 +1482,7 @@ class DAG:
         fail_fast: Optional[bool] = True,
     ):
         """Create a new DAG.
-        
+
         Args:
             name: DAG name (used for tracking and logging)
             queue: DuckQueue instance to submit jobs to. If omitted or
@@ -1481,7 +1493,7 @@ class DAG:
             validate: If True, validate DAG structure before submission
             fail_fast: If True, raise immediately on validation errors
                        If False, log warnings but continue
-        
+
         Example:
             queue = DuckQueue("jobs.db")
             dag = DAG("my_pipeline", queue, description="Daily ETL pipeline")
@@ -1520,7 +1532,6 @@ class DAG:
         self._dag_run = None  # Cached DAGRun helper
         self._parent_job_id = None  # Track parent if this is a sub-DAG
 
-
     def add_job(
         self,
         func: Callable,
@@ -1534,10 +1545,10 @@ class DAG:
         dependency_mode: DependencyMode = DependencyMode.ALL,
     ) -> str:
         """Add a job to the DAG.
-        
+
         Jobs are not executed until submit() is called. Dependencies are
         resolved by name (for jobs in this DAG) or by job ID (for external jobs).
-        
+
         Args:
             func: Function to execute (must be picklable)
             name: Job name (must be unique within DAG, auto-generated if None)
@@ -1553,40 +1564,40 @@ class DAG:
             dependency_mode: How to handle multiple dependencies:
                            - DependencyMode.ALL: wait for all parents (default)
                            - DependencyMode.ANY: wait for any parent
-            
+
         Returns:
             Job ID (UUID string)
-        
+
         Raises:
             RuntimeError: If DAG already submitted
             ValueError: If job name already exists or dependency not found
-            
+
         Example - Simple dependency:
             extract = dag.add_job(extract_data, name="extract")
             transform = dag.add_job(
-                transform_data, 
-                name="transform", 
+                transform_data,
+                name="transform",
                 depends_on="extract"
             )
-        
+
         Example - Multiple dependencies:
             load = dag.add_job(
                 load_data,
                 name="load",
                 depends_on=["transform_a", "transform_b", "transform_c"]
             )
-        
+
         Example - External dependency:
             # Job created outside this DAG
             external_id = queue.enqueue(prepare_data)
-            
+
             # Reference it by ID
             process = dag.add_job(
                 process_data,
                 name="process",
                 depends_on=external_id
             )
-        
+
         Example - ANY mode:
             # Run if ANY API succeeds (fallback pattern)
             aggregate = dag.add_job(
@@ -1684,16 +1695,16 @@ class DAG:
 
     def add_subdag(
         self,
-        dag_factory: Callable[['DuckQueue'], 'DAG'],
+        dag_factory: Callable[["DuckQueue"], "DAG"],
         name: str,
         depends_on: Union[str, List[str]] = None,
         poll_interval: float = 1.0,
         timeout: Optional[float] = None,
-        **kwargs
+        **kwargs,
     ) -> str:
         """
         Add a sub-DAG as a job.
-        
+
         Args:
             dag_factory: Function(queue) -> DAG
                         Takes a DuckQueue and returns a DAG instance.
@@ -1703,10 +1714,10 @@ class DAG:
             poll_interval: Seconds between status checks
             timeout: Max seconds to wait for sub-DAG
             **kwargs: Additional job parameters
-        
+
         Returns:
             Job ID
-        
+
         Example:
             # Define factory function (module-level)
             def create_etl_dag(queue):
@@ -1715,7 +1726,7 @@ class DAG:
                 dag.add_job(transform, name="transform", depends_on="extract")
                 dag.add_job(load, name="load", depends_on="transform")
                 return dag
-            
+
             # Use in main DAG
             main = DAG("main", queue)
             etl1 = main.add_subdag(create_etl_dag, name="etl_1")
@@ -1734,44 +1745,39 @@ class DAG:
             dag_factory=dag_factory,
             queue_path=self.queue.db_path,
             poll_interval=poll_interval,
-            timeout=timeout
+            timeout=timeout,
         )
         # Sub-DAG parent jobs should not be retried by default since
         # re-running them would resubmit the sub-DAG and potentially
         # create duplicate work. Use max_attempts=1 unless caller
         # explicitly overrides it.
-        if 'max_attempts' not in kwargs:
+        if "max_attempts" not in kwargs:
             kwargs = dict(kwargs)
-            kwargs['max_attempts'] = 1
+            kwargs["max_attempts"] = 1
 
-        return self.add_job(
-            executor,
-            name=name,
-            depends_on=depends_on,
-            **kwargs
-        )
+        return self.add_job(executor, name=name, depends_on=depends_on, **kwargs)
 
     def submit(self) -> str:
         """Submit DAG to queue for execution.
-        
+
         This atomically:
         1. Validates DAG structure (if validate=True)
         2. Creates DAG run record
         3. Inserts all jobs with dependencies
         4. Refreshes ready jobs cache
-        
+
         Returns:
             DAG run ID (UUID)
-        
+
         Raises:
             RuntimeError: If already submitted
             DAGValidationError: If validation fails (with fail_fast=True)
-        
+
         Example:
             dag = DAG("pipeline", queue)
             dag.add_job(task1, name="t1")
             dag.add_job(task2, name="t2", depends_on="t1")
-            
+
             run_id = dag.submit()
             print(f"Submitted as {run_id}")
         """
@@ -1785,6 +1791,7 @@ class DAG:
             warnings = self._context.validate()
             if warnings:
                 import warnings as warn_module
+
                 for w in warnings:
                     warn_module.warn(f"DAG '{self.name}': {w}", UserWarning)
 
@@ -1798,7 +1805,9 @@ class DAG:
         # Initialize DAGRun helper
         self._dag_run = DAGRun(self.queue, dag_run_id)
 
-        parent_info = f" (parent_job={self._parent_job_id[:8]})" if self._parent_job_id else ""
+        parent_info = (
+            f" (parent_job={self._parent_job_id[:8]})" if self._parent_job_id else ""
+        )
         self.queue.logger.info(
             f"DAG '{self.name}' submitted: {len(self.jobs)} jobs, "
             f"run_id={self._context.dag_run_id[:8]}{parent_info}"
@@ -1808,24 +1817,24 @@ class DAG:
 
     def validate(self) -> List[str]:
         """Validate DAG structure without submitting.
-        
+
         Checks for:
         - Cycles in dependency graph
         - Disconnected components (warning)
         - Missing entry points (warning)
         - Missing terminal nodes (warning)
-        
+
         Returns:
             List of warning messages (empty if no warnings)
-        
+
         Raises:
             DAGValidationError: If DAG has cycles or structural errors
-        
+
         Example:
             dag = DAG("test", queue)
             dag.add_job(task1, name="t1")
             dag.add_job(task2, name="t2", depends_on="t1")
-            
+
             warnings = dag.validate()
             if warnings:
                 for w in warnings:
@@ -1836,13 +1845,13 @@ class DAG:
     @property
     def dag_run_id(self) -> Optional[str]:
         """Get DAG run ID.
-        
+
         Returns None if DAG not yet submitted.
-        
+
         Example:
             dag = DAG("test", queue)
             print(dag.dag_run_id)  # None
-            
+
             dag.submit()
             print(dag.dag_run_id)  # UUID string
         """
@@ -1851,15 +1860,15 @@ class DAG:
     @property
     def jobs(self) -> Dict[str, str]:
         """Get mapping of job names to job IDs.
-        
+
         Returns:
             Dict[str, str]: {job_name: job_id}
-        
+
         Example:
             dag = DAG("test", queue)
             extract = dag.add_job(extract_data, name="extract")
             transform = dag.add_job(transform_data, name="transform")
-            
+
             print(dag.jobs)
             # {'extract': '<uuid>', 'transform': '<uuid>'}
         """
@@ -1868,23 +1877,23 @@ class DAG:
     @property
     def status(self) -> DAGRunStatus:
         """Get current DAG execution status.
-        
+
         Returns:
             DAGRunStatus enum:
             - PENDING: Not yet submitted
             - RUNNING: Some jobs still executing
             - DONE: All jobs completed successfully
             - FAILED: At least one job failed permanently
-        
+
         Example:
             dag = DAG("test", queue)
             print(dag.status)  # PENDING
-            
+
             dag.submit()
             print(dag.status)  # RUNNING
-            
+
             # ... jobs execute ...
-            
+
             print(dag.status)  # DONE or FAILED
         """
         if not self._submitted:
@@ -1898,13 +1907,13 @@ class DAG:
     @property
     def progress(self) -> Dict[str, int]:
         """Get job counts by status.
-        
+
         Returns:
             Dict with keys: pending, claimed, done, failed, skipped
-        
+
         Example:
             dag.submit()
-            
+
             while not dag.is_complete():
                 p = dag.progress
                 print(f"Progress: {p['done']}/{len(dag.jobs)} complete")
@@ -1916,7 +1925,7 @@ class DAG:
                 "claimed": 0,
                 "done": 0,
                 "failed": 0,
-                "skipped": 0
+                "skipped": 0,
             }
 
         if self._dag_run is None:
@@ -1926,17 +1935,17 @@ class DAG:
 
     def is_complete(self) -> bool:
         """Check if all jobs have finished (success, failure, or skipped).
-        
+
         Returns:
             True if no jobs are pending or claimed, False otherwise
-        
+
         Example:
             dag.submit()
-            
+
             while not dag.is_complete():
                 print("Waiting for completion...")
                 time.sleep(1)
-            
+
             print(f"Final status: {dag.status}")
         """
         if not self._submitted:
@@ -1949,16 +1958,16 @@ class DAG:
 
     def get_jobs(self) -> List[Dict[str, Any]]:
         """Get detailed information about all jobs in this DAG.
-        
+
         Returns:
             List of dicts with keys: id, name, status, created_at, completed_at
-        
+
         Raises:
             RuntimeError: If DAG not yet submitted
-        
+
         Example:
             dag.submit()
-            
+
             for job in dag.get_jobs():
                 print(f"{job['name']}: {job['status']}")
         """
@@ -1974,18 +1983,18 @@ class DAG:
 
     def update_status(self):
         """Update DAG run status based on current job statuses.
-        
+
         This checks if all jobs are complete and updates the DAG run
         status to DONE or FAILED accordingly.
-        
+
         Typically called automatically, but can be called manually for
         immediate status refresh.
-        
+
         Example:
             dag.submit()
-            
+
             # ... jobs execute ...
-            
+
             dag.update_status()
             print(dag.status)  # Updated status
         """
@@ -1999,25 +2008,25 @@ class DAG:
 
     def get_execution_order(self) -> List[List[str]]:
         """Get jobs in topological execution order.
-        
+
         Returns a list of "levels" where each level contains job names
         that can execute in parallel (no dependencies between them).
-        
+
         Returns:
             List[List[str]]: Each inner list is a parallelizable level
-        
+
         Example:
             dag = DAG("pipeline", queue)
-            
+
             extract = dag.add_job(extract_data, name="extract")
             t1 = dag.add_job(transform_a, name="t1", depends_on="extract")
             t2 = dag.add_job(transform_b, name="t2", depends_on="extract")
             load = dag.add_job(load_data, name="load", depends_on=["t1", "t2"])
-            
+
             order = dag.get_execution_order()
             print(order)
             # [['extract'], ['t1', 't2'], ['load']]
-            
+
             # Level 0: extract runs first
             # Level 1: t1 and t2 run in parallel after extract
             # Level 2: load runs after both transforms
@@ -2027,18 +2036,18 @@ class DAG:
     def export_mermaid(self, include_subdags: bool = True, max_depth: int = 3) -> str:
         """
         Export DAG structure as Mermaid diagram.
-        
+
         Args:
             include_subdags: If True, expand sub-DAG jobs to show their structure
             max_depth: Maximum nesting depth to render (prevents infinite recursion)
-        
+
         Returns:
             Mermaid markdown string
-        
+
         Example:
             # Simple diagram
             mermaid = dag.export_mermaid(include_subdags=False)
-            
+
             # Full hierarchy
             mermaid = dag.export_mermaid(include_subdags=True)
         """
@@ -2060,8 +2069,8 @@ class DAG:
         jobs = self.get_jobs()
 
         for job_info in jobs:
-            job_id = job_info['id']
-            job_name = job_info['name']
+            job_id = job_info["id"]
+            job_name = job_info["name"]
 
             # Check if this job spawned a sub-DAG
             subdags = self.queue.conn.execute(
@@ -2069,7 +2078,7 @@ class DAG:
                 SELECT id, name FROM dag_runs 
                 WHERE parent_job_id = ?
                 """,
-                [job_id]
+                [job_id],
             ).fetchall()
 
             if subdags and max_depth > 0:
@@ -2086,46 +2095,46 @@ class DAG:
 
                 # Add sub-DAG jobs
                 for sub_job in sub_jobs:
-                    sub_id = sub_job['id'][:8]
-                    sub_name = sub_job['name']
-                    sub_status = sub_job['status']
+                    sub_id = sub_job["id"][:8]
+                    sub_name = sub_job["name"]
+                    sub_status = sub_job["status"]
 
                     style = self._get_mermaid_style(sub_status)
                     lines.append(f'        {sub_id}["{sub_name}"]{style}')
 
                 # Add sub-DAG dependencies
                 for sub_job in sub_jobs:
-                    sub_id = sub_job['id']
+                    sub_id = sub_job["id"]
 
                     deps = self.queue.conn.execute(
                         """
                         SELECT parent_job_id FROM job_dependencies 
                         WHERE child_job_id = ?
                         """,
-                        [sub_id]
+                        [sub_id],
                     ).fetchall()
 
                     for dep in deps:
                         parent_id = dep[0][:8]
-                        lines.append(f'        {parent_id} --> {sub_id[:8]}')
+                        lines.append(f"        {parent_id} --> {sub_id[:8]}")
 
-                lines.append('    end')
+                lines.append("    end")
             else:
                 # Regular job
-                style = self._get_mermaid_style(job_info['status'])
+                style = self._get_mermaid_style(job_info["status"])
                 short_id = job_id[:8]
                 lines.append(f'    {short_id}["{job_name}"]{style}')
 
         # Add top-level dependencies
         for job_info in jobs:
-            job_id = job_info['id']
+            job_id = job_info["id"]
 
             deps = self.queue.conn.execute(
                 """
                 SELECT parent_job_id FROM job_dependencies 
                 WHERE child_job_id = ?
                 """,
-                [job_id]
+                [job_id],
             ).fetchall()
 
             for dep in deps:
@@ -2136,49 +2145,51 @@ class DAG:
                 parent_label = job_to_subdag.get(parent_id, parent_id[:8])
                 child_label = job_to_subdag.get(child_id, child_id[:8])
 
-                lines.append(f'    {parent_label} --> {child_label}')
+                lines.append(f"    {parent_label} --> {child_label}")
 
         # Add style definitions
-        lines.extend([
-            "",
-            "    classDef done fill:#90EE90",
-            "    classDef failed fill:#FFB6C6",
-            "    classDef skipped fill:#D3D3D3",
-            "    classDef running fill:#87CEEB",
-            "    classDef ready fill:#FFD700",
-        ])
+        lines.extend(
+            [
+                "",
+                "    classDef done fill:#90EE90",
+                "    classDef failed fill:#FFB6C6",
+                "    classDef skipped fill:#D3D3D3",
+                "    classDef running fill:#87CEEB",
+                "    classDef ready fill:#FFD700",
+            ]
+        )
 
         return "\n".join(lines)
 
     def _get_mermaid_style(self, status: str) -> str:
         """Get Mermaid style class for job status."""
         style_map = {
-            'done': ':::done',
-            'failed': ':::failed',
-            'skipped': ':::skipped',
-            'claimed': ':::running',
-            'pending': '',
+            "done": ":::done",
+            "failed": ":::failed",
+            "skipped": ":::skipped",
+            "claimed": ":::running",
+            "pending": "",
         }
-        return style_map.get(status, '')
+        return style_map.get(status, "")
 
-    def get_job(self, name_or_id: str) -> Optional['Job']:
+    def get_job(self, name_or_id: str) -> Optional["Job"]:
         """Get job by name or ID.
-        
+
         Args:
             name_or_id: Job name (from this DAG) or job ID (UUID)
-        
+
         Returns:
             Job object or None if not found
-        
+
         Example:
             extract_id = dag.add_job(extract_data, name="extract")
-            
+
             # Get by name
             job = dag.get_job("extract")
-            
+
             # Get by ID
             job = dag.get_job(extract_id)
-            
+
             print(job.status)
         """
         # Try as name first
@@ -2193,39 +2204,39 @@ class DAG:
         self,
         timeout: Optional[float] = None,
         poll_interval: float = 1.0,
-        callback: Optional[Callable[[Dict[str, int]], None]] = None
+        callback: Optional[Callable[[Dict[str, int]], None]] = None,
     ) -> bool:
         """Block until DAG completes or timeout.
-        
+
         Args:
             timeout: Maximum seconds to wait (None = wait forever)
             poll_interval: Seconds between status checks
             callback: Optional function called with progress dict on each poll
-        
+
         Returns:
             True if completed, False if timed out
-        
+
         Raises:
             RuntimeError: If DAG not yet submitted
-        
+
         Example - Simple wait:
             dag.submit()
             dag.wait_for_completion()
             print(f"Done! Status: {dag.status}")
-        
+
         Example - With timeout:
             dag.submit()
             if dag.wait_for_completion(timeout=300):
                 print("Completed within 5 minutes")
             else:
                 print("Timed out!")
-        
+
         Example - With progress callback:
             def show_progress(p):
                 total = sum(p.values())
                 done = p['done']
                 print(f"Progress: {done}/{total}")
-            
+
             dag.submit()
             dag.wait_for_completion(callback=show_progress)
         """
@@ -2235,6 +2246,7 @@ class DAG:
             )
 
         import time
+
         # Use a monotonic timer for timeout calculations to avoid
         # spurious timeouts if the system clock is adjusted.
         start_time = time.perf_counter()

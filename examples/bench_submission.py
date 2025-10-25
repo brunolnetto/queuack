@@ -6,6 +6,7 @@ Usage:
 This will create a DAG with N jobs (one parent and N-1 children depending on it)
 and measure the time taken by DAG.submit().
 """
+
 import argparse
 import time
 
@@ -38,8 +39,17 @@ def build_and_submit(n_jobs: int, use_memory: bool = True) -> float:
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--jobs", type=int, default=100, help="Number of jobs to create (including parent)")
-    p.add_argument("--memory", action="store_true", help="Use in-memory DuckDB for the queue (default: file)")
+    p.add_argument(
+        "--jobs",
+        type=int,
+        default=100,
+        help="Number of jobs to create (including parent)",
+    )
+    p.add_argument(
+        "--memory",
+        action="store_true",
+        help="Use in-memory DuckDB for the queue (default: file)",
+    )
     args = p.parse_args()
 
     n = args.jobs

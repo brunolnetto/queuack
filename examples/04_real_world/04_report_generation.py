@@ -76,9 +76,7 @@ with DAG("reports_master") as owner:
         dag = DAG(f"report_{region}", queue=owner.queue)
 
         dag.add_node(fetch_sales_data, args=(region,), name="fetch_sales")
-        dag.add_node(
-            fetch_inventory_data, args=(region,), name="fetch_inventory"
-        )
+        dag.add_node(fetch_inventory_data, args=(region,), name="fetch_inventory")
         dag.add_node(
             merge_data, name="merge", depends_on=["fetch_sales", "fetch_inventory"]
         )

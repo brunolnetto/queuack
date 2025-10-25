@@ -157,6 +157,7 @@ def test_detect_builtin_is_job():
     t = NodeType.detect(len)
     assert t.kind == NodeKind.JOB
 
+
 # Test helper functions (module-level for pickling)
 def simple_task():
     """Task without context."""
@@ -239,9 +240,7 @@ class TestBasicContext:
     def test_context_creation(self):
         """Test creating a TaskContext."""
         ctx = TaskContext(
-            job_id="test-job-123",
-            queue_path=":memory:",
-            dag_run_id="dag-run-456"
+            job_id="test-job-123", queue_path=":memory:", dag_run_id="dag-run-456"
         )
 
         assert ctx.job_id == "test-job-123"
@@ -250,10 +249,7 @@ class TestBasicContext:
 
     def test_context_as_context_manager(self):
         """Test context manager protocol."""
-        ctx = TaskContext(
-            job_id="test-job",
-            queue_path=":memory:"
-        )
+        ctx = TaskContext(job_id="test-job", queue_path=":memory:")
 
         with ctx as c:
             assert c is ctx
@@ -326,13 +322,16 @@ class TestContextInjection:
 
         queue.close()
 
+
 def bad_task(context):
     # Try to access upstream that doesn't exist
     return context.upstream("nonexistent")
 
+
 def task_with_upstream_no_dag(context):
     # This should fail - not in a DAG
     return context.upstream("something")
+
 
 class TestUpstreamAccess:
     """Test accessing upstream task results."""
@@ -356,9 +355,12 @@ class TestUpstreamAccess:
                 time.sleep(0.01)
 
         # Check downstream result
-        downstream_job = queue.conn.execute("""
+        downstream_job = queue.conn.execute(
+            """
             SELECT id FROM jobs WHERE node_name = 'downstream' AND dag_run_id = ?
-        """, [run_id]).fetchone()
+        """,
+            [run_id],
+        ).fetchone()
 
         result = queue.get_result(downstream_job[0])
         assert result == {"sum": 15}  # sum([1,2,3,4,5])
@@ -372,11 +374,7 @@ class TestUpstreamAccess:
         with DAG("test_multi_parent", queue) as dag:
             dag.add_job(multi_parent_task, name="parent1")
             dag.add_job(multi_parent_task2, name="parent2")
-            dag.add_job(
-                combine_task,
-                name="combine",
-                depends_on=["parent1", "parent2"]
-            )
+            dag.add_job(combine_task, name="combine", depends_on=["parent1", "parent2"])
 
         # Execute all jobs
         while not dag.is_complete():
@@ -388,9 +386,12 @@ class TestUpstreamAccess:
                 time.sleep(0.01)
 
         # Check combined result
-        combine_job = queue.conn.execute("""
+        combine_job = queue.conn.execute(
+            """
             SELECT id FROM jobs WHERE node_name = 'combine'
-        """, []).fetchone()
+        """,
+            [],
+        ).fetchone()
 
         result = queue.get_result(combine_job[0])
         assert result == {"total": 30}  # 10 + 20
@@ -404,11 +405,7 @@ class TestUpstreamAccess:
         with DAG("test_get_all", queue) as dag:
             dag.add_job(multi_parent_task, name="p1")
             dag.add_job(multi_parent_task2, name="p2")
-            dag.add_job(
-                get_all_parents_task,
-                name="child",
-                depends_on=["p1", "p2"]
-            )
+            dag.add_job(get_all_parents_task, name="child", depends_on=["p1", "p2"])
 
         # Execute
         while not dag.is_complete():
@@ -420,9 +417,12 @@ class TestUpstreamAccess:
                 time.sleep(0.01)
 
         # Check result
-        child_job = queue.conn.execute("""
+        child_job = queue.conn.execute(
+            """
             SELECT id FROM jobs WHERE node_name = 'child'
-        """, []).fetchone()
+        """,
+            [],
+        ).fetchone()
 
         result = queue.get_result(child_job[0])
         assert result["count"] == 2
@@ -433,8 +433,6 @@ class TestUpstreamAccess:
     def test_upstream_not_found_raises(self):
         """Test that accessing non-existent upstream raises."""
         queue = DuckQueue(":memory:")
-
-
 
         with DAG("test_bad_upstream", queue) as dag:
             dag.add_job(upstream_task, name="upstream")
@@ -505,9 +503,12 @@ class TestOptionalUpstream:
                 time.sleep(0.01)
 
         # Check result
-        child_job = queue.conn.execute("""
+        child_job = queue.conn.execute(
+            """
             SELECT id FROM jobs WHERE node_name = 'child'
-        """, []).fetchone()
+        """,
+            [],
+        ).fetchone()
 
         result = queue.get_result(child_job[0])
         assert result["has_optional"] is True
@@ -585,16 +586,10 @@ class TestGetParentNames:
         """Test getting list of parent names."""
         queue = DuckQueue(":memory:")
 
-
-
         with DAG("test_parent_names", queue) as dag:
             dag.add_job(multi_parent_task, name="parent1")
             dag.add_job(multi_parent_task2, name="parent2")
-            dag.add_job(
-                check_parents,
-                name="child",
-                depends_on=["parent1", "parent2"]
-            )
+            dag.add_job(check_parents, name="child", depends_on=["parent1", "parent2"])
 
         # Execute
         while not dag.is_complete():
@@ -606,9 +601,12 @@ class TestGetParentNames:
                 time.sleep(0.01)
 
         # Check result
-        child_job = queue.conn.execute("""
+        child_job = queue.conn.execute(
+            """
             SELECT id FROM jobs WHERE node_name = 'child'
-        """, []).fetchone()
+        """,
+            [],
+        ).fetchone()
 
         result = queue.get_result(child_job[0])
         assert result["parent_names"] == ["parent1", "parent2"]
@@ -632,29 +630,31 @@ class TestContextWithWorkers:
             dag.wait_for_completion(timeout=5.0)
 
         # Verify results
-        downstream_job = queue.conn.execute("""
+        downstream_job = queue.conn.execute(
+            """
             SELECT id FROM jobs WHERE node_name = 'downstream'
-        """, []).fetchone()
+        """,
+            [],
+        ).fetchone()
 
         result = queue.get_result(downstream_job[0])
         assert result == {"sum": 15}
+
 
 # ============================================================================
 # Pattern 1: Context Only
 # ============================================================================
 
+
 def context_only(context):
     """Most common pattern - context as only parameter."""
-    return {
-        "pattern": "context_only",
-        "job_id": context.job_id,
-        "has_context": True
-    }
+    return {"pattern": "context_only", "job_id": context.job_id, "has_context": True}
 
 
 # ============================================================================
 # Pattern 2: Args + Context
 # ============================================================================
+
 
 def args_then_context(arg1, arg2, context):
     """Regular args followed by context."""
@@ -662,7 +662,7 @@ def args_then_context(arg1, arg2, context):
         "pattern": "args_then_context",
         "arg1": arg1,
         "arg2": arg2,
-        "job_id": context.job_id
+        "job_id": context.job_id,
     }
 
 
@@ -670,13 +670,14 @@ def args_then_context(arg1, arg2, context):
 # Pattern 3: Context + Kwargs
 # ============================================================================
 
+
 def context_with_kwargs(context, multiplier=2, prefix="result"):
     """Context with optional kwargs."""
     return {
         "pattern": "context_with_kwargs",
         "job_id": context.job_id,
         "multiplier": multiplier,
-        "prefix": prefix
+        "prefix": prefix,
     }
 
 
@@ -684,13 +685,14 @@ def context_with_kwargs(context, multiplier=2, prefix="result"):
 # Pattern 4: Args + Context + Kwargs
 # ============================================================================
 
+
 def args_context_kwargs(arg1, context, multiplier=2):
     """All three: positional args, context, and kwargs."""
     return {
         "pattern": "args_context_kwargs",
         "arg1": arg1,
         "job_id": context.job_id,
-        "multiplier": multiplier
+        "multiplier": multiplier,
     }
 
 
@@ -698,30 +700,26 @@ def args_context_kwargs(arg1, context, multiplier=2):
 # Pattern 5: Context with ctx alias
 # ============================================================================
 
+
 def using_ctx_alias(ctx):
     """Using 'ctx' instead of 'context'."""
-    return {
-        "pattern": "using_ctx",
-        "job_id": ctx.job_id
-    }
+    return {"pattern": "using_ctx", "job_id": ctx.job_id}
 
 
 # ============================================================================
 # Pattern 6: No Context (Backward Compatibility)
 # ============================================================================
 
+
 def no_context(arg1, arg2):
     """Old-style task without context."""
-    return {
-        "pattern": "no_context",
-        "arg1": arg1,
-        "arg2": arg2
-    }
+    return {"pattern": "no_context", "arg1": arg1, "arg2": arg2}
 
 
 # ============================================================================
 # Pattern 7: Upstream Access
 # ============================================================================
+
 
 def parent_task():
     """Parent task that returns data."""
@@ -734,13 +732,14 @@ def child_with_upstream(context):
     return {
         "pattern": "upstream_access",
         "parent_data": parent_data,
-        "sum": sum(parent_data["data"])
+        "sum": sum(parent_data["data"]),
     }
 
 
 # ============================================================================
 # Test Runner
 # ============================================================================
+
 
 def test_pattern_1():
     """Test: Context only."""
@@ -790,8 +789,7 @@ def test_pattern_3():
 
     queue = DuckQueue(":memory:")
     job_id = queue.enqueue(
-        context_with_kwargs,
-        kwargs={"multiplier": 5, "prefix": "test"}
+        context_with_kwargs, kwargs={"multiplier": 5, "prefix": "test"}
     )
 
     job = queue.claim()
@@ -814,9 +812,7 @@ def test_pattern_4():
 
     queue = DuckQueue(":memory:")
     job_id = queue.enqueue(
-        args_context_kwargs,
-        args=("value1",),
-        kwargs={"multiplier": 10}
+        args_context_kwargs, args=("value1",), kwargs={"multiplier": 10}
     )
 
     job = queue.claim()
@@ -885,6 +881,7 @@ def test_pattern_7():
 
     # Execute
     import time
+
     while not dag.is_complete():
         job = queue.claim()
         if job:

@@ -64,9 +64,7 @@ def finalize_func() -> None:
 
 with DAG("depends_on_external") as dag:
     # Create an external job first on the same queue used by the DAG
-    external_job_id = dag.queue.enqueue(
-        external_processing_func
-    )
+    external_job_id = dag.queue.enqueue(external_processing_func)
 
     print(f"📋 Created external job: {external_job_id[:8]}")
 

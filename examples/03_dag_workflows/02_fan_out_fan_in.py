@@ -104,8 +104,6 @@ with DAG("fan_out_fan_in") as dag:
     print("Execution levels:", dag.get_execution_order())
     print()
 
-
-
     # Execute the DAG jobs
     print("🚀 Executing DAG jobs...")
     print("Watch for parallel processing of partitions!")

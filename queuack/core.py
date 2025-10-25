@@ -56,6 +56,7 @@ class QueueConfig:
     dep_chunk_size: int = None
     poll_timeout: float = DEFAULT_POLL_TIMEOUT
 
+
 from .dag import DAG, DAGContext
 from .data_models import BackpressureError, Job
 from .status import JobStatus
@@ -86,7 +87,7 @@ class DuckQueue:
         logger: Optional[logging.Logger] = None,
         serialization: str = "pickle",  # "pickle" or "json_ref"
         # BULLETPROOF CONCURRENCY CONTROL
-        force_memory_db: bool = False  # Override auto-migration for :memory:
+        force_memory_db: bool = False,  # Override auto-migration for :memory:
     ):
         """Initialize queue with schema creation."""
         if workers_num is not None and workers_num <= 0:
@@ -100,9 +101,7 @@ class DuckQueue:
         # BULLETPROOF FIX: Auto-migrate unsafe :memory: + multiple workers
         original_db_path = db_path
         self._temp_file_cleanup = None  # Initialize before resolution
-        self.db_path = self._resolve_safe_db_path(
-            db_path, workers_num, force_memory_db
-        )
+        self.db_path = self._resolve_safe_db_path(db_path, workers_num, force_memory_db)
         self._was_auto_migrated = self.db_path != original_db_path
 
         self.default_queue = default_queue
@@ -167,9 +166,9 @@ class DuckQueue:
 
         # UNSAFE CONFIGURATION: :memory: + multiple workers
         # Auto-migrate to temp file for safety
-        import tempfile
         import atexit
         import os
+        import tempfile
 
         # Get a temp path but don't create the file (DuckDB will create it)
         temp_dir = tempfile.gettempdir()
@@ -201,11 +200,16 @@ class DuckQueue:
         if self._temp_file_cleanup:
             try:
                 import os
+
                 if os.path.exists(self._temp_file_cleanup):
                     os.unlink(self._temp_file_cleanup)
-                    self.logger.debug(f"Cleaned up auto-migrated database: {self._temp_file_cleanup}")
+                    self.logger.debug(
+                        f"Cleaned up auto-migrated database: {self._temp_file_cleanup}"
+                    )
             except Exception as e:
-                self.logger.debug(f"Could not clean up temp database {self._temp_file_cleanup}: {e}")
+                self.logger.debug(
+                    f"Could not clean up temp database {self._temp_file_cleanup}: {e}"
+                )
 
     # Backpressure thresholds are configurable via classmethods so tests
     # or subclasses can override them for faster runs.
@@ -707,9 +711,17 @@ class DuckQueue:
     # Claim/Ack (Consumer API)
     # ========================================================================
 
-    def ack(self, job_id: str, result: Any = None, error: Optional[str] = None, worker_id: Optional[str] = None):
+    def ack(
+        self,
+        job_id: str,
+        result: Any = None,
+        error: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ):
         """Acknowledge job completion."""
-        return self._execute_with_connection_lock(self._ack_internal, job_id, result, error, worker_id)
+        return self._execute_with_connection_lock(
+            self._ack_internal, job_id, result, error, worker_id
+        )
 
     def _ack_internal(self, job_id, result, error, worker_id):
         """Internal ack method that runs with proper locking."""
@@ -718,7 +730,9 @@ class DuckQueue:
         except Exception as e:
             # Log transaction conflicts but don't fail acks
             if "TransactionContext Error" in str(e) or "write-write conflict" in str(e):
-                self.logger.warning(f"Transaction conflict acking job {job_id[:8]}: {e}")
+                self.logger.warning(
+                    f"Transaction conflict acking job {job_id[:8]}: {e}"
+                )
                 return
             else:
                 raise
@@ -729,7 +743,7 @@ class DuckQueue:
         result: Any = None,
         error: Optional[str] = None,
         worker_id: Optional[str] = None,
-        max_retries: int = 2
+        max_retries: int = 2,
     ):
         """Internal ack method with transaction conflict retry logic."""
         for attempt in range(max_retries):
@@ -738,14 +752,18 @@ class DuckQueue:
                 return
             except Exception as e:
                 # Only retry on specific transaction conflicts
-                if "write-write conflict" in str(e) or ("TransactionContext Error" in str(e) and "commit" in str(e)):
+                if "write-write conflict" in str(e) or (
+                    "TransactionContext Error" in str(e) and "commit" in str(e)
+                ):
                     if attempt < max_retries - 1:
                         # Very short sleep
                         time.sleep(0.002 + attempt * 0.002)
                         continue
                     else:
                         # Log warning but don't raise to avoid worker crashes
-                        self.logger.warning(f"Failed to ack job {job_id[:8]} after {max_retries} attempts: {e}")
+                        self.logger.warning(
+                            f"Failed to ack job {job_id[:8]} after {max_retries} attempts: {e}"
+                        )
                         return
                 else:
                     # Re-raise non-transaction errors immediately
@@ -756,7 +774,7 @@ class DuckQueue:
         job_id: str,
         result: Any = None,
         error: Optional[str] = None,
-        worker_id: Optional[str] = None
+        worker_id: Optional[str] = None,
     ):
         """Single attempt to acknowledge job completion."""
         now = datetime.now()
@@ -764,8 +782,7 @@ class DuckQueue:
         try:
             if error:
                 job = self.conn.execute(
-                    "SELECT attempts, max_attempts FROM jobs WHERE id = ?",
-                    [job_id]
+                    "SELECT attempts, max_attempts FROM jobs WHERE id = ?", [job_id]
                 ).fetchone()
                 self.conn.commit()
 
@@ -773,16 +790,18 @@ class DuckQueue:
                     # Retry
                     self.conn.execute(
                         "UPDATE jobs SET status = 'pending', error = ?, claimed_at = NULL, claimed_by = NULL WHERE id = ?",
-                        [error, job_id]
+                        [error, job_id],
                     )
                     self.conn.commit()
 
-                    self.logger.info(f"Job {job_id[:8]} failed (attempt {job[0]}/{job[1]}), requeued")
+                    self.logger.info(
+                        f"Job {job_id[:8]} failed (attempt {job[0]}/{job[1]}), requeued"
+                    )
                 else:
                     # Failed permanently
                     self.conn.execute(
                         "UPDATE jobs SET status = 'failed', completed_at = ?, error = ? WHERE id = ?",
-                        [now, error, job_id]
+                        [now, error, job_id],
                     )
                     self.conn.commit()
                     self.logger.error(f"Job {job_id[:8]} failed permanently: {error}")
@@ -796,7 +815,13 @@ class DuckQueue:
                                 UPDATE jobs SET status = 'skipped', ...
                                 RETURNING jobs.id
                                 """,
-                                [job_id, now, f"parent_failed:{job_id}", "queuack", now]
+                                [
+                                    job_id,
+                                    now,
+                                    f"parent_failed:{job_id}",
+                                    "queuack",
+                                    now,
+                                ],
                             ).fetchall()
                             self.conn.commit()
 
@@ -814,7 +839,7 @@ class DuckQueue:
                 result_bytes = pickle.dumps(result) if result is not None else None
                 self.conn.execute(
                     "UPDATE jobs SET status = 'done', completed_at = ?, result = ? WHERE id = ?",
-                    [now, result_bytes, job_id]
+                    [now, result_bytes, job_id],
                 )
                 self.logger.info(f"Job {job_id[:8]} completed successfully")
 
@@ -830,15 +855,14 @@ class DuckQueue:
             raise
 
     def claim(
-        self,
-        queue: str = None,
-        worker_id: str = None,
-        claim_timeout: int = 300
+        self, queue: str = None, worker_id: str = None, claim_timeout: int = 300
     ) -> Optional[Job]:
         """
         Atomically claim next pending job.
         """
-        return self._execute_with_connection_lock(self._claim_internal, queue, worker_id, claim_timeout)
+        return self._execute_with_connection_lock(
+            self._claim_internal, queue, worker_id, claim_timeout
+        )
 
     def _claim_internal(self, queue, worker_id, claim_timeout):
         """Internal claim method that runs with proper locking."""
@@ -860,7 +884,7 @@ class DuckQueue:
         queue: str = None,
         worker_id: str = None,
         claim_timeout: int = 300,
-        max_retries: int = 2
+        max_retries: int = 2,
     ) -> Optional[Job]:
         """Internal claim method with transaction conflict retry logic."""
         queue = queue or self.default_queue
@@ -871,14 +895,18 @@ class DuckQueue:
                 return self._attempt_claim(queue, worker_id, claim_timeout)
             except Exception as e:
                 # Only retry on specific DuckDB transaction conflicts
-                if ("TransactionContext Error" in str(e) and "Conflict" in str(e)) or "tuple deletion" in str(e):
+                if (
+                    "TransactionContext Error" in str(e) and "Conflict" in str(e)
+                ) or "tuple deletion" in str(e):
                     if attempt < max_retries - 1:
                         # Very short sleep to avoid contention
                         time.sleep(0.001 + attempt * 0.001)
                         continue
                     else:
                         # Log and return None instead of raising to avoid worker crashes
-                        self.logger.debug(f"Failed to claim job after {max_retries} attempts: {e}")
+                        self.logger.debug(
+                            f"Failed to claim job after {max_retries} attempts: {e}"
+                        )
                         return None
                 else:
                     # Re-raise non-transaction errors immediately
@@ -887,10 +915,7 @@ class DuckQueue:
         return None
 
     def _attempt_claim(
-        self,
-        queue: str,
-        worker_id: str,
-        claim_timeout: int
+        self, queue: str, worker_id: str, claim_timeout: int
     ) -> Optional[Job]:
         """Single attempt to claim a job."""
         now = datetime.now()
@@ -954,8 +979,8 @@ class DuckQueue:
                 )
                 RETURNING *
             """,
-                [now, worker_id, queue, now - timedelta(seconds=claim_timeout), now],
-            )
+            [now, worker_id, queue, now - timedelta(seconds=claim_timeout), now],
+        )
 
         # CRITICAL FIX: Fetch BEFORE commit
         result = cursor.fetchone()
@@ -974,13 +999,13 @@ class DuckQueue:
 
         # Expose the DuckQueue instance on the claiming thread
         import threading
+
         try:
             threading.current_thread()._queuack_queue = self
         except Exception:
             pass
 
         return Job(**job_dict)
-
 
     def claim_batch(
         self,
@@ -1011,7 +1036,7 @@ class DuckQueue:
         queue: str = None,
         worker_id: str = None,
         claim_timeout: int = 300,
-        max_retries: int = 1  # Even more conservative for batch operations
+        max_retries: int = 1,  # Even more conservative for batch operations
     ) -> List[Job]:
         """Internal claim_batch method with transaction conflict retry logic."""
         queue = queue or self.default_queue
@@ -1029,7 +1054,9 @@ class DuckQueue:
                         continue
                     else:
                         # Return empty list instead of raising
-                        self.logger.debug(f"Failed to claim batch after {max_retries} attempts: {e}")
+                        self.logger.debug(
+                            f"Failed to claim batch after {max_retries} attempts: {e}"
+                        )
                         return []
                 else:
                     # Re-raise non-transaction errors immediately
@@ -1038,11 +1065,7 @@ class DuckQueue:
         return []
 
     def _attempt_claim_batch(
-        self,
-        count: int,
-        queue: str,
-        worker_id: str,
-        claim_timeout: int
+        self, count: int, queue: str, worker_id: str, claim_timeout: int
     ) -> List[Job]:
         """Single attempt to claim multiple jobs."""
         now = datetime.now()
@@ -1134,6 +1157,7 @@ class DuckQueue:
 
         # Set the claiming thread's queue reference
         import threading
+
         try:
             threading.current_thread()._queuack_queue = self
         except Exception:
@@ -1141,7 +1165,13 @@ class DuckQueue:
 
         return jobs
 
-    def ack(self, job_id: str, result: Any = None, error: Optional[str] = None, worker_id: Optional[str] = None):
+    def ack(
+        self,
+        job_id: str,
+        result: Any = None,
+        error: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ):
         """
         Acknowledge job completion.
 
@@ -1581,22 +1611,23 @@ class DuckQueue:
         fail_fast: bool = True,
     ) -> DAG:
         """Create a new DAG (recommended API).
-        
+
         Example:
             dag = queue.create_dag("etl")
             extract = dag.add_job(extract_data, name="extract")
             dag.submit()
-        
+
         Returns:
             DAG instance
         """
         from .dag import DAG
+
         return DAG(
             name=name,
             queue=self,
             description=description,
             validate=validate,
-            fail_fast=fail_fast
+            fail_fast=fail_fast,
         )
 
 
@@ -1737,7 +1768,9 @@ class Worker:
         empty_polls_allowed = 3
         empty_polls = 0
 
-        while time.perf_counter() < drain_deadline and empty_polls < empty_polls_allowed:
+        while (
+            time.perf_counter() < drain_deadline and empty_polls < empty_polls_allowed
+        ):
             job = self._claim_next_job()
             if not job:
                 empty_polls += 1
@@ -1755,7 +1788,9 @@ class Worker:
         # timeout behavior as above.
         drain_deadline = time.perf_counter() + WORKER_DRAIN_SECONDS
         empty_polls = 0
-        while time.perf_counter() < drain_deadline and empty_polls < empty_polls_allowed:
+        while (
+            time.perf_counter() < drain_deadline and empty_polls < empty_polls_allowed
+        ):
             job = self._claim_next_job()
             if not job:
                 empty_polls += 1
@@ -1786,7 +1821,9 @@ class Worker:
                     try:
                         job = self._claim_next_job()
                     except Exception as e:
-                        self.logger.warning(f"Error claiming job in worker {self.worker_id}: {e}")
+                        self.logger.warning(
+                            f"Error claiming job in worker {self.worker_id}: {e}"
+                        )
                         time.sleep(poll_interval)
                         continue
 
@@ -1879,6 +1916,7 @@ class Worker:
                     )
 
             self.logger.error(f"✗ [{self.worker_id}] Job {job.id[:8]} failed: {e}")
+
 
 class ConnectionPool:
     """Thread-safe connection pool for DuckDB.
@@ -1993,7 +2031,7 @@ class ConnectionPool:
 class _ConnectionContext:
     """Context manager for thread-safe database operations."""
 
-    def __init__(self, pool: 'ConnectionPool'):
+    def __init__(self, pool: "ConnectionPool"):
         self.pool = pool
         self.conn = None
 
@@ -2109,4 +2147,3 @@ def job(
         return func
 
     return decorator
-

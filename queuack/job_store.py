@@ -142,12 +142,9 @@ class DuckQueueAdapter(JobStore):
         sql = f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?"
         params.append(job_id)
 
-
         if is_skipped_update:
             # Append attempts = max_attempts to the SET clause
-            sql = sql.replace(
-                "WHERE id = ?", ", attempts = max_attempts WHERE id = ?"
-            )
+            sql = sql.replace("WHERE id = ?", ", attempts = max_attempts WHERE id = ?")
 
         self.queue.conn.execute(sql, params)
 

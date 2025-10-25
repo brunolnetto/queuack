@@ -25,9 +25,10 @@ RESULTS_DIR = "results_spark"
 # Task Functions (all module-level for pickling)
 # ============================================================================
 
+
 def extract():
     """Simulate extracting rows of data.
-    
+
     Returns a list of dicts representing rows. With the context system,
     we can return data directly - no manual file writing needed unless
     the data is truly large.
@@ -35,21 +36,17 @@ def extract():
     print("📥 Extracting sample data for Spark ETL...")
     rows = []
     for i in range(20):
-        rows.append({
-            "id": i,
-            "value": i * 2,
-            "group": "even" if i % 2 == 0 else "odd"
-        })
+        rows.append({"id": i, "value": i * 2, "group": "even" if i % 2 == 0 else "odd"})
     print(f"✅ Extracted {len(rows)} rows")
     return rows
 
 
 def spark_transform(context: TaskContext):
     """Transform the input rows using PySpark if available.
-    
+
     Uses context.upstream() to automatically get the parent task result.
     No manual job ID passing needed!
-    
+
     Args:
         context: Automatically injected TaskContext
     """
@@ -62,10 +59,11 @@ def spark_transform(context: TaskContext):
         from pyspark.sql import Row, SparkSession
 
         print("🚀 Running transform with PySpark (local mode)...")
-        spark = SparkSession.builder\
-            .master("local[1]")\
-            .appName("queuack-spark-example")\
+        spark = (
+            SparkSession.builder.master("local[1]")
+            .appName("queuack-spark-example")
             .getOrCreate()
+        )
 
         # Convert list of dicts to DataFrame
         rdd = spark.sparkContext.parallelize(rows)
@@ -73,8 +71,10 @@ def spark_transform(context: TaskContext):
 
         # Example transform: compute value_squared and filter
         from pyspark.sql.functions import col, pow
-        out = df.withColumn("value_squared", pow(col("value"), 2))\
-                .filter(col("value") >= 10)
+
+        out = df.withColumn("value_squared", pow(col("value"), 2)).filter(
+            col("value") >= 10
+        )
 
         result = [row.asDict() for row in out.collect()]
 
@@ -88,9 +88,7 @@ def spark_transform(context: TaskContext):
         # Fallback path when pyspark isn't available
         print(f"⚠️ PySpark not available, using Python fallback: {e}")
         transformed = [
-            dict(r, value_squared=r["value"] ** 2)
-            for r in rows
-            if r["value"] >= 10
+            dict(r, value_squared=r["value"] ** 2) for r in rows if r["value"] >= 10
         ]
         print(f"✅ Fallback transform produced {len(transformed)} rows")
         return transformed
@@ -98,12 +96,12 @@ def spark_transform(context: TaskContext):
 
 def load(context: TaskContext):
     """Persist results to results_spark directory as JSON.
-    
+
     Uses context.upstream() to get the transform task result.
-    
+
     Args:
         context: Automatically injected TaskContext
-    
+
     Returns:
         Path to output file
     """
@@ -113,13 +111,12 @@ def load(context: TaskContext):
     print(f"📦 Loading {len(results)} results...")
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = os.path.join(
-        RESULTS_DIR,
-        f"spark_etl_{timestamp}_{uuid.uuid4().hex[:8]}.json"
+        RESULTS_DIR, f"spark_etl_{timestamp}_{uuid.uuid4().hex[:8]}.json"
     )
 
-    with open(out_path, 'w') as f:
+    with open(out_path, "w") as f:
         json.dump(results, f, default=str, indent=2)
 
     print(f"✅ Saved results to {out_path}")
@@ -130,9 +127,10 @@ def load(context: TaskContext):
 # Large Data Variant (for truly large datasets)
 # ============================================================================
 
+
 def extract_large():
     """Extract large dataset - write to disk and return path.
-    
+
     For datasets > 1MB, it's better to write to disk and pass file paths
     to avoid database bloat.
     """
@@ -141,11 +139,7 @@ def extract_large():
     # Simulate large dataset
     rows = []
     for i in range(10000):  # Larger dataset
-        rows.append({
-            "id": i,
-            "value": i * 2,
-            "group": "even" if i % 2 == 0 else "odd"
-        })
+        rows.append({"id": i, "value": i * 2, "group": "even" if i % 2 == 0 else "odd"})
 
     # Write to disk
     os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -159,7 +153,7 @@ def extract_large():
 
 def spark_transform_large(context: TaskContext):
     """Transform large dataset - read from path, write to new path.
-    
+
     Args:
         context: Automatically injected TaskContext
     """
@@ -176,15 +170,17 @@ def spark_transform_large(context: TaskContext):
         from pyspark.sql import Row, SparkSession
         from pyspark.sql.functions import col, pow
 
-        spark = SparkSession.builder\
-            .master("local[1]")\
-            .appName("queuack-spark-large")\
+        spark = (
+            SparkSession.builder.master("local[1]")
+            .appName("queuack-spark-large")
             .getOrCreate()
+        )
 
         rdd = spark.sparkContext.parallelize(rows)
         df = rdd.map(lambda d: Row(**d)).toDF()
-        out = df.withColumn("value_squared", pow(col("value"), 2))\
-                .filter(col("value") >= 100)
+        out = df.withColumn("value_squared", pow(col("value"), 2)).filter(
+            col("value") >= 100
+        )
 
         result = [row.asDict() for row in out.collect()]
         spark.stop()
@@ -194,17 +190,12 @@ def spark_transform_large(context: TaskContext):
     except Exception as e:
         print(f"⚠️ Spark unavailable: {e}")
         result = [
-            dict(r, value_squared=r["value"]**2)
-            for r in rows
-            if r["value"] >= 100
+            dict(r, value_squared=r["value"] ** 2) for r in rows if r["value"] >= 100
         ]
 
     # Write result to disk
-    output_path = os.path.join(
-        RESULTS_DIR,
-        f"transform_{uuid.uuid4().hex[:8]}.json"
-    )
-    with open(output_path, 'w') as f:
+    output_path = os.path.join(RESULTS_DIR, f"transform_{uuid.uuid4().hex[:8]}.json")
+    with open(output_path, "w") as f:
         json.dump(result, f, default=str)
 
     print(f"📁 Wrote {len(result)} rows to {output_path}")
@@ -213,7 +204,7 @@ def spark_transform_large(context: TaskContext):
 
 def load_large(context: TaskContext):
     """Load from file path.
-    
+
     Args:
         context: Automatically injected TaskContext
     """
@@ -227,13 +218,10 @@ def load_large(context: TaskContext):
     print(f"📦 Loaded {len(results)} results")
 
     # Final output
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    final_path = os.path.join(
-        RESULTS_DIR,
-        f"spark_etl_large_{timestamp}.json"
-    )
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    final_path = os.path.join(RESULTS_DIR, f"spark_etl_large_{timestamp}.json")
 
-    with open(final_path, 'w') as f:
+    with open(final_path, "w") as f:
         json.dump(results, f, default=str, indent=2)
 
     print(f"✅ Saved final results to {final_path}")
@@ -254,16 +242,8 @@ if __name__ == "__main__":
 
     with DAG("spark_etl_small", description="Small dataset example") as dag:
         dag.add_node(extract, name="extract")
-        dag.add_node(
-            spark_transform,
-            name="spark_transform",
-            depends_on="extract"
-        )
-        dag.add_node(
-            load,
-            name="load",
-            depends_on="spark_transform"
-        )
+        dag.add_node(spark_transform, name="spark_transform", depends_on="extract")
+        dag.add_node(load, name="load", depends_on="spark_transform")
 
         dag.submit()
         dag.wait_for_completion(poll_interval=0.5)
@@ -279,13 +259,9 @@ if __name__ == "__main__":
         dag.add_node(
             spark_transform_large,
             name="spark_transform_large",
-            depends_on="extract_large"
+            depends_on="extract_large",
         )
-        dag.add_node(
-            load_large,
-            name="load_large",
-            depends_on="spark_transform_large"
-        )
+        dag.add_node(load_large, name="load_large", depends_on="spark_transform_large")
 
         dag.submit()
         dag.wait_for_completion(poll_interval=0.5)

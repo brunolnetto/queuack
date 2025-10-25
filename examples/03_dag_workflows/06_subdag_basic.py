@@ -19,6 +19,7 @@ Run:
 
 # Difficulty: intermediate
 """
+
 import time
 
 from examples.utils.tempfile import create_temp_path
@@ -56,7 +57,9 @@ def main():
 
     print("🦆 SubDAG Basic Example")
     print("=======================")
-    print("This example demonstrates sub-DAG execution with proper separation of concerns:")
+    print(
+        "This example demonstrates sub-DAG execution with proper separation of concerns:"
+    )
     print("- Queue: Stores jobs")
     print("- DAG: Defines workflow and submits jobs")
     print("- Worker: Processes the submitted jobs")
@@ -124,7 +127,7 @@ def main():
     final_stats = queue.stats()
 
     print()
-    print(f"🎉 Example completed!")
+    print("🎉 Example completed!")
     print(f"   Total time: {total_time:.2f}s")
     print(f"   Jobs processed manually: {jobs_processed}")
     print(f"   Final DAG status: {dag.status.value}")
@@ -133,7 +136,6 @@ def main():
     print("💡 Key Takeaway:")
     print("   The SCRIPT manages workers, not the queue.")
     print("   This maintains clear separation of responsibilities.")
-
 
 
 if __name__ == "__main__":

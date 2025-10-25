@@ -82,7 +82,9 @@ class NodeType:
     kind: NodeKind = NodeKind.JOB
 
     @classmethod
-    def detect(cls, func: Callable, explicit: Optional[Union[str, NodeKind]] = None) -> "NodeType":
+    def detect(
+        cls, func: Callable, explicit: Optional[Union[str, NodeKind]] = None
+    ) -> "NodeType":
         # Honor explicit overrides
         if explicit is not None:
             if isinstance(explicit, NodeKind):
@@ -143,18 +145,18 @@ class NodeType:
         return cls(kind=NodeKind.JOB)
 
 
-
 # ============================================================================
 # Data Models
 # ============================================================================
 
+
 @dataclass
 class TaskContext:
     """Context passed to every task execution.
-    
+
     Provides access to parent task results and DAG metadata without
     requiring manual job ID passing.
-    
+
     Attributes:
         job_id: Current job's ID
         queue_path: Path to DuckDB file
@@ -173,7 +175,7 @@ class TaskContext:
     @property
     def queue(self):
         """Lazy-load queue connection.
-        
+
         Creates a DuckQueue instance on first access. Connection is reused
         for the lifetime of this context.
         """
@@ -182,26 +184,31 @@ class TaskContext:
             # same database path. This keeps ":memory:" DuckDB usage working
             # inside the same process/thread (same connection/visibility).
             import threading as _td
-            thread_q = getattr(_td.current_thread(), '_queuack_queue', None)
-            if thread_q is not None and getattr(thread_q, 'db_path', None) == self.queue_path:
+
+            thread_q = getattr(_td.current_thread(), "_queuack_queue", None)
+            if (
+                thread_q is not None
+                and getattr(thread_q, "db_path", None) == self.queue_path
+            ):
                 self._queue = thread_q
             else:
                 from queuack import DuckQueue
+
                 self._queue = DuckQueue(self.queue_path)
         return self._queue
 
     def get_parent_result(self, parent_job_id: str) -> Any:
         """Get result from a specific parent task.
-        
+
         Args:
             parent_job_id: Job ID of the parent task
-            
+
         Returns:
             Unpickled result from parent task
-            
+
         Raises:
             ValueError: If parent job not found or not complete
-        
+
         Example:
             result = context.get_parent_result("abc123...")
         """
@@ -211,10 +218,10 @@ class TaskContext:
 
     def get_parent_results(self) -> List[Any]:
         """Get all parent task results (in dependency order).
-        
+
         Returns:
             List of parent results, ordered by parent job ID
-            
+
         Example:
             # Task with multiple parents
             def combine(context):
@@ -222,11 +229,14 @@ class TaskContext:
                 return merge(parents)
         """
         if self._parent_ids is None:
-            parent_ids = self.queue.conn.execute("""
+            parent_ids = self.queue.conn.execute(
+                """
                 SELECT parent_job_id FROM job_dependencies
                 WHERE child_job_id = ?
                 ORDER BY parent_job_id
-            """, [self.job_id]).fetchall()
+            """,
+                [self.job_id],
+            ).fetchall()
 
             self._parent_ids = [pid[0] for pid in parent_ids]
 
@@ -234,19 +244,19 @@ class TaskContext:
 
     def upstream(self, task_name: str) -> Any:
         """Get result from parent task by name.
-        
+
         This is the recommended API for DAG tasks - cleaner and more
         readable than using job IDs.
-        
+
         Args:
             task_name: Name of the upstream task (from dag.add_job(name=...))
-            
+
         Returns:
             Result from the named upstream task
-            
+
         Raises:
             ValueError: If no upstream task with that name exists
-            
+
         Example:
             def transform(context):
                 # Get result from task named "extract"
@@ -263,13 +273,16 @@ class TaskContext:
         # why parent lookups may fail in tests.
         params = [self.job_id, task_name, self.dag_run_id]
         try:
-            result = self.queue.conn.execute("""
+            result = self.queue.conn.execute(
+                """
                 SELECT j.id FROM jobs j
                 JOIN job_dependencies jd ON jd.parent_job_id = j.id
                 WHERE jd.child_job_id = ?
                     AND j.node_name = ?
                     AND j.dag_run_id = ?
-            """, params).fetchone()
+            """,
+                params,
+            ).fetchone()
         except Exception as e:
             # On error, attach diagnostic info and re-raise
             print(f"DEBUG upstream query failed: params={params}, error={e}")
@@ -281,14 +294,18 @@ class TaskContext:
         if result is None:
             try:
                 import time as _time
+
                 _time.sleep(0.01)
-                result = self.queue.conn.execute("""
+                result = self.queue.conn.execute(
+                    """
                     SELECT j.id FROM jobs j
                     JOIN job_dependencies jd ON jd.parent_job_id = j.id
                     WHERE jd.child_job_id = ?
                         AND j.node_name = ?
                         AND j.dag_run_id = ?
-                """, params).fetchone()
+                """,
+                    params,
+                ).fetchone()
             except Exception:
                 # Ignore retry exceptions; we'll fall through to diagnostics
                 result = None
@@ -297,8 +314,11 @@ class TaskContext:
             try:
                 # Print diagnostic about queue path resolution
                 import threading as _td
-                thread_q = getattr(_td.current_thread(), '_queuack_queue', None)
-                print(f"DEBUG upstream: TaskContext.queue_path={self.queue_path}, thread_q.db_path={(getattr(thread_q,'db_path',None))}, self.queue is thread_q? {self._queue is thread_q}")
+
+                thread_q = getattr(_td.current_thread(), "_queuack_queue", None)
+                print(
+                    f"DEBUG upstream: TaskContext.queue_path={self.queue_path}, thread_q.db_path={(getattr(thread_q, 'db_path', None))}, self.queue is thread_q? {self._queue is thread_q}"
+                )
 
                 parents = self.queue.conn.execute(
                     "SELECT parent_job_id FROM job_dependencies WHERE child_job_id = ?",
@@ -324,10 +344,10 @@ class TaskContext:
 
     def get_parent_names(self) -> List[str]:
         """Get names of all parent tasks.
-        
+
         Returns:
             List of parent task names
-            
+
         Example:
             def task(context):
                 print(f"Parents: {context.get_parent_names()}")
@@ -341,9 +361,12 @@ class TaskContext:
 
         names = []
         for pid in self._parent_ids:
-            result = self.queue.conn.execute("""
+            result = self.queue.conn.execute(
+                """
                 SELECT node_name FROM jobs WHERE id = ?
-            """, [pid]).fetchone()
+            """,
+                [pid],
+            ).fetchone()
             if result and result[0]:
                 names.append(result[0])
 
@@ -351,13 +374,13 @@ class TaskContext:
 
     def has_upstream(self, task_name: str) -> bool:
         """Check if an upstream task exists.
-        
+
         Args:
             task_name: Name to check
-            
+
         Returns:
             True if upstream task exists, False otherwise
-            
+
         Example:
             def task(context):
                 if context.has_upstream("optional_preprocessing"):
@@ -373,7 +396,7 @@ class TaskContext:
 
     def close(self):
         """Close queue connection and cleanup resources.
-        
+
         Automatically called when context exits. Normally you don't need
         to call this manually.
         """
@@ -396,10 +419,10 @@ class TaskContext:
 
 def get_context() -> Optional[TaskContext]:
     """Get current task context from thread-local storage.
-    
+
     Returns:
         TaskContext if currently executing within a task, None otherwise
-        
+
     Example:
         def my_helper_function():
             context = get_context()
@@ -408,18 +431,18 @@ def get_context() -> Optional[TaskContext]:
             else:
                 data = load_from_config()
     """
-    return getattr(threading.current_thread(), '_queuack_context', None)
+    return getattr(threading.current_thread(), "_queuack_context", None)
 
 
 def set_context(context: Optional[TaskContext]):
     """Set current task context (internal use).
-    
+
     Args:
         context: TaskContext to set, or None to clear
     """
     if context is None:
         try:
-            delattr(threading.current_thread(), '_queuack_context')
+            delattr(threading.current_thread(), "_queuack_context")
         except AttributeError:
             pass
     else:
@@ -482,12 +505,12 @@ class Job:
     def execute(self, logger: Optional[logging.Logger] = None) -> Any:
         """
         Execute the job (unpickle function and call it).
-        
+
         Automatically injects TaskContext if the function accepts a
         'context' or 'ctx' parameter. Context can be injected as:
         - Keyword argument (if function uses keyword-only or has defaults)
         - Positional argument (if signature requires it)
-        
+
         Supports three patterns:
         1. task(context) - context only
         2. task(arg1, arg2, context) - args + context
@@ -509,11 +532,12 @@ class Job:
         args = pickle.loads(self.args)
         kwargs = pickle.loads(self.kwargs)
 
-        func_name = getattr(func, '__name__', repr(func))
+        func_name = getattr(func, "__name__", repr(func))
 
         # Get queue from thread-local (set by worker/claim)
         import threading
-        queue = getattr(threading.current_thread(), '_queuack_queue', None)
+
+        queue = getattr(threading.current_thread(), "_queuack_queue", None)
 
         # Create context if queue is available
         context = None
@@ -521,16 +545,14 @@ class Job:
 
         if queue is not None:
             try:
-
                 context = TaskContext(
-                    job_id=self.id,
-                    queue_path=queue.db_path,
-                    dag_run_id=self.dag_run_id
+                    job_id=self.id, queue_path=queue.db_path, dag_run_id=self.dag_run_id
                 )
                 set_context(context)
 
                 # Analyze function signature to determine injection strategy
                 import inspect
+
                 try:
                     sig = inspect.signature(func)
 
@@ -539,7 +561,7 @@ class Job:
                     context_param = None
 
                     for param_name, param in sig.parameters.items():
-                        if param_name in ('context', 'ctx'):
+                        if param_name in ("context", "ctx"):
                             context_param_name = param_name
                             context_param = param
                             break
@@ -553,7 +575,9 @@ class Job:
                             # def task(context, /): ...
                             args = args + (context,)
                             inject_context = True
-                            logger.info(f"Executing {func_name} with positional context")
+                            logger.info(
+                                f"Executing {func_name} with positional context"
+                            )
 
                         elif param_kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
                             # Most common case: can be positional or keyword
@@ -571,14 +595,18 @@ class Job:
                                 # Inject as keyword argument (safest)
                                 kwargs = dict(kwargs, **{context_param_name: context})
                                 inject_context = True
-                                logger.info(f"Executing {func_name} with injected {context_param_name}")
+                                logger.info(
+                                    f"Executing {func_name} with injected {context_param_name}"
+                                )
 
                         elif param_kind == inspect.Parameter.KEYWORD_ONLY:
                             # Keyword-only: must inject as keyword
                             # def task(*, context): ...
                             kwargs = dict(kwargs, **{context_param_name: context})
                             inject_context = True
-                            logger.info(f"Executing {func_name} with keyword-only context")
+                            logger.info(
+                                f"Executing {func_name} with keyword-only context"
+                            )
 
                         elif param_kind == inspect.Parameter.VAR_POSITIONAL:
                             # *args - can't inject context here
@@ -586,7 +614,9 @@ class Job:
 
                         elif param_kind == inspect.Parameter.VAR_KEYWORD:
                             # **kwargs - context would be in kwargs already
-                            logger.debug("Cannot inject context into **kwargs parameter")
+                            logger.debug(
+                                "Cannot inject context into **kwargs parameter"
+                            )
 
                 except (ValueError, TypeError) as e:
                     # Can't inspect signature (builtin, etc), skip injection
@@ -606,16 +636,21 @@ class Job:
             # CRITICAL FIX: SubDAGExecutor needs parent_job_id
             # Check if this is a SubDAGExecutor and inject parent_job_id
             from queuack.dag import SubDAGExecutor
+
             if isinstance(func, SubDAGExecutor):
                 # Debug what we're dealing with
-                logger.info(f"SubDAGExecutor - args: {args}, kwargs: {list(kwargs.keys()) if kwargs else 'None'}")
+                logger.info(
+                    f"SubDAGExecutor - args: {args}, kwargs: {list(kwargs.keys()) if kwargs else 'None'}"
+                )
 
                 # The issue is that SubDAGExecutor.__call__(parent_job_id=None) expects parent_job_id
                 # but we need to pass self.id. We must be careful about positional vs keyword args.
 
                 if args and len(args) > 0:
                     # If there are positional args, first one might conflict with parent_job_id
-                    logger.warning(f"SubDAGExecutor called with positional args: {args}")
+                    logger.warning(
+                        f"SubDAGExecutor called with positional args: {args}"
+                    )
                     # Call as-is and let it fail for now to understand the issue
                     result = func(*args, **kwargs)
                 else:
@@ -638,6 +673,7 @@ class Job:
                     set_context(None)
                 except ImportError:
                     pass
+
 
 @dataclass
 class JobSpec:

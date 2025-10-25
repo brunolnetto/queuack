@@ -71,9 +71,10 @@ import threading
 _process_queue = None
 _process_queue_lock = threading.Lock()
 
-def get_default_queue(db_path: str = "duckqueue.db") -> 'DuckQueue':
+
+def get_default_queue(db_path: str = "duckqueue.db") -> "DuckQueue":
     """Get or create the process-wide default queue.
-    
+
     This ensures all DAGs and workers in the same process share
     one queue instance, avoiding lock conflicts.
     """
@@ -82,8 +83,10 @@ def get_default_queue(db_path: str = "duckqueue.db") -> 'DuckQueue':
     with _process_queue_lock:
         if _process_queue is None:
             from .core import DuckQueue
+
             _process_queue = DuckQueue(db_path)
         return _process_queue
+
 
 def close_default_queue():
     """Close the default queue (useful for cleanup in tests)."""

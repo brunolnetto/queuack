@@ -4,26 +4,29 @@ Tests to improve code coverage for previously uncovered areas.
 This module focuses on testing error paths, edge cases, and utility functions
 that weren't covered by the main test suite.
 """
+
 import os
 import tempfile
 import threading
 import time
-from pathlib import Path
 
 import pytest
 
 from queuack import (
-    get_default_queue,
-    close_default_queue,
-    DuckQueue,
-    Worker,
-    WorkerPool,
     DAGValidationError,
+    DuckQueue,
+    WorkerPool,
+    close_default_queue,
+    get_default_queue,
 )
-from queuack.data_models import BackpressureError
 from queuack.core import ConnectionPool
-from queuack.data_models import Job, JobSpec
-from queuack.status import JobStatus, NodeStatus, job_status_to_node_status, node_status_to_job_status
+from queuack.data_models import BackpressureError, JobSpec
+from queuack.status import (
+    JobStatus,
+    NodeStatus,
+    job_status_to_node_status,
+    node_status_to_job_status,
+)
 
 
 def simple_task():
@@ -75,7 +78,10 @@ class TestStatusConversions:
     def test_job_status_to_node_status_conversions(self):
         """Test all job status to node status conversions."""
         assert job_status_to_node_status(JobStatus.PENDING) == NodeStatus.PENDING
-        assert job_status_to_node_status(JobStatus.CLAIMED, claimed_started=True) == NodeStatus.RUNNING
+        assert (
+            job_status_to_node_status(JobStatus.CLAIMED, claimed_started=True)
+            == NodeStatus.RUNNING
+        )
         assert job_status_to_node_status(JobStatus.DONE) == NodeStatus.DONE
         assert job_status_to_node_status(JobStatus.FAILED) == NodeStatus.FAILED
         assert job_status_to_node_status(JobStatus.DELAYED) == NodeStatus.PENDING
@@ -160,9 +166,11 @@ class TestWorkerPoolEdgeCases:
         pool.start()
         pool.stop()
 
+
 def slow_task():
-            time.sleep(2)
-            return "too slow"
+    time.sleep(2)
+    return "too slow"
+
 
 class TestJobExecutionEdgeCases:
     """Test edge cases in job execution."""
@@ -170,8 +178,6 @@ class TestJobExecutionEdgeCases:
     def test_job_with_timeout(self):
         """Test job execution with timeout."""
         queue = DuckQueue(":memory:")
-
-        
 
         # Enqueue job with short timeout
         job_id = queue.enqueue(slow_task, timeout_seconds=0.1)
@@ -340,7 +346,7 @@ class TestJobSpecEdgeCases:
             name="test_job",
             priority=5,
             timeout_seconds=30,
-            max_attempts=3
+            max_attempts=3,
         )
 
         assert spec.func == simple_task
@@ -355,7 +361,7 @@ class TestJobSpecEdgeCases:
 @pytest.fixture
 def temp_db():
     """Create a temporary database file that doesn't exist initially."""
-    fd, path = tempfile.mkstemp(suffix='.db')
+    fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     os.unlink(path)  # Remove the file, keep just the path
     yield path

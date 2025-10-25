@@ -4,32 +4,34 @@ Strategic coverage tests to push overall coverage to 90%+.
 This module targets specific uncovered lines identified in coverage analysis
 to maximize coverage gains with focused, high-impact tests.
 """
+
 import os
 import tempfile
-import threading
 import time
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import pytest
 
 from queuack import (
-    get_default_queue,
-    close_default_queue,
-    DuckQueue,
-    Worker,
-    WorkerPool,
     DAG,
-    DAGEngine,
     DAGContext,
+    DAGEngine,
     DAGValidationError,
-    Job,
+    DuckQueue,
     JobSpec,
     TaskContext,
+    Worker,
+    WorkerPool,
+    close_default_queue,
+    get_default_queue,
 )
 from queuack.core import ConnectionPool
-from queuack.data_models import NodeKind, NodeType, BackpressureError
-from queuack.status import JobStatus, NodeStatus, job_status_to_node_status, node_status_to_job_status
+from queuack.data_models import BackpressureError, NodeKind, NodeType
+from queuack.status import (
+    JobStatus,
+    NodeStatus,
+    job_status_to_node_status,
+    node_status_to_job_status,
+)
 
 
 def simple_task():
@@ -45,6 +47,7 @@ def failing_task():
 # =============================================================================
 # Priority 1: __init__.py Coverage (55% → 90%) - Need 7 lines from 9 missing
 # =============================================================================
+
 
 class TestInitModuleCoverage:
     """Test missing lines in __init__.py - highest impact, lowest effort."""
@@ -82,10 +85,12 @@ class TestInitModuleCoverage:
 # Priority 2: data_models.py Coverage (83% → 90%) - Need 18 lines from 46 missing
 # =============================================================================
 
+
 def task_with_context(context=None):
-            if context:
-                return f"Context: {type(context).__name__}"
-            return "No context"
+    if context:
+        return f"Context: {type(context).__name__}"
+    return "No context"
+
 
 class TestDataModelsCoverage:
     """Test missing lines in data_models.py."""
@@ -95,19 +100,19 @@ class TestDataModelsCoverage:
         spec = JobSpec(
             func=simple_task,
             args=(1, 2, 3),
-            kwargs={'key': 'value'},
-            name='test_job',
+            kwargs={"key": "value"},
+            name="test_job",
             priority=5,
             timeout_seconds=30,
             max_attempts=3,
-            depends_on=['dep1', 'dep2']
+            depends_on=["dep1", "dep2"],
         )
 
         # Test all attributes are set correctly
         assert spec.func == simple_task
         assert spec.args == (1, 2, 3)
-        assert spec.kwargs == {'key': 'value'}
-        assert spec.name == 'test_job'
+        assert spec.kwargs == {"key": "value"}
+        assert spec.name == "test_job"
         assert spec.priority == 5
         assert spec.timeout_seconds == 30
         assert spec.max_attempts == 3
@@ -135,9 +140,7 @@ class TestDataModelsCoverage:
     def test_task_context_creation(self):
         """Test TaskContext creation and basic methods."""
         context = TaskContext(
-            job_id="test-job-id",
-            queue_path=":memory:",
-            dag_run_id="test-dag-run"
+            job_id="test-job-id", queue_path=":memory:", dag_run_id="test-dag-run"
         )
 
         assert context.job_id == "test-job-id"
@@ -145,7 +148,7 @@ class TestDataModelsCoverage:
         assert context.dag_run_id == "test-dag-run"
 
         # Test methods that might exist
-        if hasattr(context, 'get_parent_names'):
+        if hasattr(context, "get_parent_names"):
             names = context.get_parent_names()
             assert isinstance(names, list)
 
@@ -171,7 +174,7 @@ class TestDataModelsCoverage:
         job = queue.claim()
 
         # Job should have timeout in its attributes
-        assert hasattr(job, 'timeout_seconds') or hasattr(job, 'timeout')
+        assert hasattr(job, "timeout_seconds") or hasattr(job, "timeout")
 
         # Test execution with short timeout
         start_time = time.time()
@@ -186,6 +189,7 @@ class TestDataModelsCoverage:
 # =============================================================================
 # Priority 3: DAG Module Coverage (81% → 90%) - Need 69 lines from 144 missing
 # =============================================================================
+
 
 class TestDAGModuleCoverage:
     """Test missing lines in dag.py."""
@@ -248,7 +252,7 @@ class TestDAGModuleCoverage:
             # Test engine with simple DAG
             dag = DAG("test-dag")
             # DAGEngine might have different API
-            if hasattr(engine, 'submit_dag'):
+            if hasattr(engine, "submit_dag"):
                 result = engine.submit_dag(dag)
                 assert result is not None
         except Exception:
@@ -260,9 +264,11 @@ class TestDAGModuleCoverage:
 # Priority 4: Core Module Coverage (80% → 90%) - Need 72 lines from 144 missing
 # =============================================================================
 
+
 def slow_task():
     time.sleep(1)
     return "slow result"
+
 
 class TestCoreModuleCoverage:
     """Test missing lines in core.py."""
@@ -273,9 +279,9 @@ class TestCoreModuleCoverage:
             pool = ConnectionPool(":memory:")
 
             # Test initialization states
-            if hasattr(pool, 'mark_initializing'):
+            if hasattr(pool, "mark_initializing"):
                 pool.mark_initializing()
-            if hasattr(pool, 'mark_ready'):
+            if hasattr(pool, "mark_ready"):
                 pool.mark_ready()
 
             # Test connection retrieval
@@ -296,10 +302,7 @@ class TestCoreModuleCoverage:
 
         # Test with custom parameters
         worker = Worker(
-            queue=queue,
-            queues=["custom_queue"],
-            worker_id="test-worker",
-            concurrency=2
+            queue=queue, queues=["custom_queue"], worker_id="test-worker", concurrency=2
         )
 
         assert worker.worker_id == "test-worker"
@@ -310,11 +313,7 @@ class TestCoreModuleCoverage:
         queue = DuckQueue(":memory:")
 
         # Test with available parameters only
-        pool = WorkerPool(
-            queue=queue,
-            num_workers=2,
-            concurrency=1
-        )
+        pool = WorkerPool(queue=queue, num_workers=2, concurrency=1)
 
         # Test lifecycle (WorkerPool might not have a running attribute)
         pool.start()
@@ -371,7 +370,7 @@ class TestCoreModuleCoverage:
             queue.enqueue(simple_task)
 
         # Test cleanup operations if they exist
-        cleanup_methods = ['cleanup', '_cleanup_auto_migrated_db', 'stop_workers']
+        cleanup_methods = ["cleanup", "_cleanup_auto_migrated_db", "stop_workers"]
         for method_name in cleanup_methods:
             if hasattr(queue, method_name):
                 method = getattr(queue, method_name)
@@ -389,6 +388,7 @@ class TestCoreModuleCoverage:
 # Status and Exception Coverage
 # =============================================================================
 
+
 class TestStatusAndExceptionCoverage:
     """Test status conversions and exception handling."""
 
@@ -396,7 +396,10 @@ class TestStatusAndExceptionCoverage:
         """Test all status conversion functions."""
         # Test job to node status
         assert job_status_to_node_status(JobStatus.PENDING) == NodeStatus.PENDING
-        assert job_status_to_node_status(JobStatus.CLAIMED, claimed_started=True) == NodeStatus.RUNNING
+        assert (
+            job_status_to_node_status(JobStatus.CLAIMED, claimed_started=True)
+            == NodeStatus.RUNNING
+        )
         assert job_status_to_node_status(JobStatus.DONE) == NodeStatus.DONE
         assert job_status_to_node_status(JobStatus.FAILED) == NodeStatus.FAILED
         assert job_status_to_node_status(JobStatus.DELAYED) == NodeStatus.PENDING
@@ -428,7 +431,7 @@ class TestStatusAndExceptionCoverage:
 @pytest.fixture
 def temp_db_path():
     """Create a temporary database path."""
-    fd, path = tempfile.mkstemp(suffix='.db')
+    fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     os.unlink(path)  # Remove file, keep path
     yield path

@@ -106,19 +106,12 @@ with DAG("ml_pipeline") as dag:
         )
 
         dag.add_node(
-            evaluate_model,
-            name=f"eval_{model_type}",
-            depends_on=f"train_{model_type}"
+            evaluate_model, name=f"eval_{model_type}", depends_on=f"train_{model_type}"
         )
         models.append(f"eval_{model_type}")
 
     # Deploy best model (ANY mode: first to finish)
-    dag.add_node(
-        deploy_model,
-        name="deploy",
-        depends_on=models,
-        dependency_mode="any"
-    )
+    dag.add_node(deploy_model, name="deploy", depends_on=models, dependency_mode="any")
 
     print("Submitting ML training DAG and waiting for completion...")
     dag.submit()

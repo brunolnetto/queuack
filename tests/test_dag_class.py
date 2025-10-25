@@ -66,17 +66,20 @@ def queue():
     yield q
     q.close()
 
+
 @pytest.fixture
 def file_queue():
     """Create file-based queue for SubDAG testing."""
     import tempfile
-    db_path = tempfile.mktemp(suffix='.db')
+
+    db_path = tempfile.mktemp(suffix=".db")
     q = DuckQueue(db_path)
     yield q
     q.close()
     # Clean up temp file
     try:
         import os
+
         os.unlink(db_path)
     except OSError:
         pass
@@ -85,6 +88,7 @@ def file_queue():
 # ============================================================================
 # Basic DAG Class Tests
 # ============================================================================
+
 
 class TestDAGBasics:
     """Test basic DAG class functionality."""
@@ -145,6 +149,7 @@ class TestDAGBasics:
 # Job Management Tests
 # ============================================================================
 
+
 class TestJobManagement:
     """Test adding and managing jobs in DAG."""
 
@@ -172,10 +177,7 @@ class TestJobManagement:
         dag = DAG("test", queue)
 
         job_id = dag.add_job(
-            transform_data,
-            name="transform",
-            args=([1, 2, 3],),
-            kwargs={"key": "value"}
+            transform_data, name="transform", args=([1, 2, 3],), kwargs={"key": "value"}
         )
 
         assert job_id is not None
@@ -249,6 +251,7 @@ class TestJobManagement:
 # Dependency Tests
 # ============================================================================
 
+
 class TestDependencies:
     """Test job dependency management."""
 
@@ -257,11 +260,7 @@ class TestDependencies:
         dag = DAG("test", queue)
 
         extract = dag.add_job(extract_data, name="extract")
-        transform = dag.add_job(
-            transform_data,
-            name="transform",
-            depends_on="extract"
-        )
+        transform = dag.add_job(transform_data, name="transform", depends_on="extract")
 
         assert extract in dag.jobs.values()
         assert transform in dag.jobs.values()
@@ -272,11 +271,7 @@ class TestDependencies:
 
         j1 = dag.add_job(extract_data, name="job1")
         j2 = dag.add_job(extract_data, name="job2")
-        j3 = dag.add_job(
-            transform_data,
-            name="job3",
-            depends_on=["job1", "job2"]
-        )
+        j3 = dag.add_job(transform_data, name="job3", depends_on=["job1", "job2"])
 
         assert len(dag.jobs) == 3
 
@@ -286,11 +281,7 @@ class TestDependencies:
         external_id = queue.enqueue(extract_data)
 
         dag = DAG("test", queue)
-        internal = dag.add_job(
-            transform_data,
-            name="internal",
-            depends_on=external_id
-        )
+        internal = dag.add_job(transform_data, name="internal", depends_on=external_id)
 
         assert internal in dag.jobs.values()
 
@@ -301,9 +292,7 @@ class TestDependencies:
         dag = DAG("test", queue)
         internal = dag.add_job(extract_data, name="internal")
         combined = dag.add_job(
-            transform_data,
-            name="combined",
-            depends_on=["internal", external_id]
+            transform_data, name="combined", depends_on=["internal", external_id]
         )
 
         assert len(dag.jobs) == 2
@@ -315,10 +304,7 @@ class TestDependencies:
         dag.add_job(extract_data, name="job1")
 
         with pytest.raises(ValueError, match="not found"):
-            dag.add_job(
-                transform_data,
-                depends_on="nonexistent"
-            )
+            dag.add_job(transform_data, depends_on="nonexistent")
 
     def test_add_job_invalid_dependency_no_fail_fast(self, queue):
         """Test invalid dependency with fail_fast=False."""
@@ -328,12 +314,9 @@ class TestDependencies:
 
         # Should not raise, but log warning
         import warnings
+
         with warnings.catch_warnings(record=True):
-            dag.add_job(
-                transform_data,
-                name="job2",
-                depends_on="nonexistent"
-            )
+            dag.add_job(transform_data, name="job2", depends_on="nonexistent")
 
     def test_dependency_mode_all(self, queue):
         """Test ALL dependency mode (default)."""
@@ -345,7 +328,7 @@ class TestDependencies:
             transform_data,
             name="child",
             depends_on=["p1", "p2"],
-            dependency_mode=DependencyMode.ALL
+            dependency_mode=DependencyMode.ALL,
         )
 
         assert child in dag.jobs.values()
@@ -360,7 +343,7 @@ class TestDependencies:
             transform_data,
             name="child",
             depends_on=["p1", "p2"],
-            dependency_mode=DependencyMode.ANY
+            dependency_mode=DependencyMode.ANY,
         )
 
         assert child in dag.jobs.values()
@@ -369,6 +352,7 @@ class TestDependencies:
 # ============================================================================
 # Submission Tests
 # ============================================================================
+
 
 class TestSubmission:
     """Test DAG submission."""
@@ -417,7 +401,7 @@ class TestSubmission:
         # Check database
         result = queue.conn.execute(
             "SELECT name, description, status FROM dag_runs WHERE id = ?",
-            [dag.dag_run_id]
+            [dag.dag_run_id],
         ).fetchone()
 
         assert result is not None
@@ -436,8 +420,7 @@ class TestSubmission:
 
         # Check jobs exist
         count = queue.conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE dag_run_id = ?",
-            [dag.dag_run_id]
+            "SELECT COUNT(*) FROM jobs WHERE dag_run_id = ?", [dag.dag_run_id]
         ).fetchone()[0]
 
         assert count == 2
@@ -458,7 +441,7 @@ class TestSubmission:
             FROM job_dependencies
             WHERE parent_job_id = ?
             """,
-            [j1]
+            [j1],
         ).fetchall()
 
         assert len(deps) == 1
@@ -468,6 +451,7 @@ class TestSubmission:
 # ============================================================================
 # Status and Progress Tests
 # ============================================================================
+
 
 class TestStatusAndProgress:
     """Test DAG status tracking and progress monitoring."""
@@ -588,6 +572,7 @@ class TestStatusAndProgress:
 # Validation Tests
 # ============================================================================
 
+
 class TestValidation:
     """Test DAG validation."""
 
@@ -643,6 +628,7 @@ class TestValidation:
 
         # Should warn but not raise
         import warnings
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             dag.submit()
@@ -654,6 +640,7 @@ class TestValidation:
 # Execution Tests
 # ============================================================================
 
+
 class TestExecution:
     """Test DAG execution."""
 
@@ -662,11 +649,7 @@ class TestExecution:
         dag = DAG("linear", queue)
 
         extract = dag.add_job(extract_data, name="extract")
-        transform = dag.add_job(
-            transform_data,
-            name="transform",
-            depends_on="extract"
-        )
+        transform = dag.add_job(transform_data, name="transform", depends_on="extract")
 
         dag.submit()
 
@@ -722,6 +705,7 @@ class TestExecution:
 # Context Manager Tests
 # ============================================================================
 
+
 class TestContextManager:
     """Test DAG as context manager."""
 
@@ -757,6 +741,7 @@ class TestContextManager:
 # ============================================================================
 # Wait for Completion Tests
 # ============================================================================
+
 
 class TestWaitForCompletion:
     """Test wait_for_completion functionality."""
@@ -825,6 +810,7 @@ class TestWaitForCompletion:
 # Mermaid Export Tests
 # ============================================================================
 
+
 class TestMermaidExport:
     """Test Mermaid diagram export."""
 
@@ -862,6 +848,7 @@ class TestMermaidExport:
 # ============================================================================
 # Edge Cases
 # ============================================================================
+
 
 class TestEdgeCases:
     """Test edge cases and error conditions."""
@@ -904,11 +891,7 @@ class TestEdgeCases:
         prev = dag.add_job(noop, name="job_0")
 
         for i in range(1, 20):
-            dag.add_job(
-                noop,
-                name=f"job_{i}",
-                depends_on=f"job_{i-1}"
-            )
+            dag.add_job(noop, name=f"job_{i}", depends_on=f"job_{i - 1}")
 
         dag.submit()
 
@@ -920,6 +903,7 @@ class TestEdgeCases:
 # Integration Tests
 # ============================================================================
 
+
 class TestIntegration:
     """Integration tests with full execution."""
 
@@ -929,16 +913,9 @@ class TestIntegration:
 
         extract = dag.add_job(extract_data, name="extract")
         transform = dag.add_job(
-            transform_data,
-            name="transform",
-            depends_on="extract",
-            args=([1, 2, 3],)
+            transform_data, name="transform", depends_on="extract", args=([1, 2, 3],)
         )
-        load = dag.add_job(
-            load_data,
-            name="load",
-            depends_on="transform"
-        )
+        load = dag.add_job(load_data, name="load", depends_on="transform")
 
         dag.submit()
 
@@ -996,7 +973,7 @@ class TestIntegration:
             noop,
             name="child",
             depends_on=["success", "failure"],
-            dependency_mode=DependencyMode.ANY
+            dependency_mode=DependencyMode.ANY,
         )
 
         dag.submit()
@@ -1013,7 +990,9 @@ class TestIntegration:
 
         # Child should still be runnable (ANY mode: one parent succeeded)
         child_job = queue.claim()
-        assert child_job is not None, "Child with ANY dependency should be claimable when one parent succeeds"
+        assert child_job is not None, (
+            "Child with ANY dependency should be claimable when one parent succeeds"
+        )
         assert child_job.id == child
 
     def test_mixed_external_internal_dependencies(self, queue):
@@ -1029,11 +1008,7 @@ class TestIntegration:
         dag = DAG("mixed", queue)
 
         internal = dag.add_job(noop, name="internal")
-        combined = dag.add_job(
-            noop,
-            name="combined",
-            depends_on=[external, "internal"]
-        )
+        combined = dag.add_job(noop, name="combined", depends_on=[external, "internal"])
 
         dag.submit()
 
@@ -1051,6 +1026,7 @@ class TestIntegration:
 # Comparison Tests (DAG vs DAGContext)
 # ============================================================================
 
+
 class TestDAGvsDAGContext:
     """Test that DAG class produces same results as DAGContext."""
 
@@ -1064,19 +1040,18 @@ class TestDAGvsDAGContext:
 
         # Using DAGContext
         from queuack import DAGContext
+
         with DAGContext(queue, "dag_context") as dag2:
             j1_ctx = dag2.enqueue(noop, name="job1")
             j2_ctx = dag2.enqueue(noop, name="job2", depends_on="job1")
 
         # Both should have created DAG runs
         dag1_run = queue.conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE dag_run_id = ?",
-            [dag1.dag_run_id]
+            "SELECT COUNT(*) FROM jobs WHERE dag_run_id = ?", [dag1.dag_run_id]
         ).fetchone()[0]
 
         dag2_run = queue.conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE dag_run_id = ?",
-            [dag2.dag_run_id]
+            "SELECT COUNT(*) FROM jobs WHERE dag_run_id = ?", [dag2.dag_run_id]
         ).fetchone()[0]
 
         assert dag1_run == 2
@@ -1095,6 +1070,7 @@ class TestDAGvsDAGContext:
 
         # Using DAGContext
         from queuack import DAGContext
+
         dag2 = DAGContext(queue, "test2")
         dag2.enqueue(noop, name="a")
         dag2.enqueue(noop, name="b", depends_on="a")
@@ -1106,9 +1082,11 @@ class TestDAGvsDAGContext:
         # Orders should be identical
         assert order1 == order2
 
+
 # ============================================================================
 # Property Tests
 # ============================================================================
+
 
 class TestProperties:
     """Test DAG property access."""
@@ -1162,6 +1140,7 @@ class TestProperties:
 # ============================================================================
 # Error Message Tests
 # ============================================================================
+
 
 class TestErrorMessages:
     """Test quality of error messages."""
@@ -1220,12 +1199,14 @@ class TestErrorMessages:
 # Logging Tests
 # ============================================================================
 
+
 class TestLogging:
     """Test DAG logging behavior."""
 
     def test_submit_logs_info(self, queue, caplog):
         """Test that submission logs informative message."""
         import logging
+
         caplog.set_level(logging.INFO)
 
         dag = DAG("test", queue)
@@ -1242,6 +1223,7 @@ class TestLogging:
 # ============================================================================
 # Thread Safety Tests
 # ============================================================================
+
 
 class TestThreadSafety:
     """Test thread safety of DAG operations."""
@@ -1261,10 +1243,7 @@ class TestThreadSafety:
             except Exception as e:
                 errors.append(e)
 
-        threads = [
-            threading.Thread(target=add_jobs, args=(i * 10,))
-            for i in range(5)
-        ]
+        threads = [threading.Thread(target=add_jobs, args=(i * 10,)) for i in range(5)]
 
         for t in threads:
             t.start()
@@ -1304,6 +1283,7 @@ class TestThreadSafety:
 # ============================================================================
 # Performance Tests
 # ============================================================================
+
 
 class TestPerformance:
     """Test performance characteristics."""
@@ -1352,6 +1332,7 @@ class TestPerformance:
 # Documentation Example Tests
 # ============================================================================
 
+
 class TestDocumentationExamples:
     """Test that documentation examples actually work."""
 
@@ -1361,16 +1342,8 @@ class TestDocumentationExamples:
 
         # Build workflow
         extract = dag.add_job(extract_data, name="extract")
-        transform = dag.add_job(
-            transform_data,
-            name="transform",
-            depends_on="extract"
-        )
-        load = dag.add_job(
-            load_data,
-            name="load",
-            depends_on="transform"
-        )
+        transform = dag.add_job(transform_data, name="transform", depends_on="extract")
+        load = dag.add_job(load_data, name="load", depends_on="transform")
 
         # Submit and monitor
         dag.submit()
@@ -1393,7 +1366,7 @@ class TestDocumentationExamples:
         load = dag.add_job(
             load_data,
             name="load",
-            depends_on=["transform_a", "transform_b", "transform_c"]
+            depends_on=["transform_a", "transform_b", "transform_c"],
         )
 
         dag.submit()
@@ -1417,7 +1390,7 @@ class TestDocumentationExamples:
             noop,
             name="process",
             depends_on=["api1", "api2", "api3"],
-            dependency_mode=DependencyMode.ANY
+            dependency_mode=DependencyMode.ANY,
         )
 
         dag.submit()
@@ -1436,6 +1409,7 @@ class TestDocumentationExamples:
 # ============================================================================
 # Regression Tests
 # ============================================================================
+
 
 class TestRegressions:
     """Test for known bugs and regressions."""
@@ -1476,24 +1450,29 @@ class TestRegressions:
         job = dag.get_job("job1")
         assert job is not None
 
+
 # ============================================================================
 # SubDAG Executor Tests
 # ============================================================================
+
 
 def factory(q):
     dag = DAG("sub", q)
     dag.add_job(noop, name="job1")
     return dag
 
-def create_sub(q):
-    dag = DAG("sub", q)
-    dag.add_job(noop, name="job1")
-    return dag
 
 def create_sub(q):
     dag = DAG("sub", q)
     dag.add_job(noop, name="job1")
     return dag
+
+
+def create_sub(q):
+    dag = DAG("sub", q)
+    dag.add_job(noop, name="job1")
+    return dag
+
 
 class TestSubDAGExecutor:
     """Test SubDAGExecutor wrapper."""
@@ -1508,9 +1487,7 @@ class TestSubDAGExecutor:
             return dag
 
         executor = SubDAGExecutor(
-            dag_factory=factory,
-            queue_path=queue.db_path,
-            poll_interval=0.1
+            dag_factory=factory, queue_path=queue.db_path, poll_interval=0.1
         )
 
         assert executor.dag_factory is factory
@@ -1522,10 +1499,7 @@ class TestSubDAGExecutor:
 
         from queuack.dag import SubDAGExecutor
 
-        executor = SubDAGExecutor(
-            dag_factory=factory,
-            queue_path=queue.db_path
-        )
+        executor = SubDAGExecutor(dag_factory=factory, queue_path=queue.db_path)
 
         # Should be picklable
         pickled = pickle.dumps(executor)
@@ -1537,6 +1511,7 @@ class TestSubDAGExecutor:
 # ============================================================================
 # Basic Sub-DAG Tests
 # ============================================================================
+
 
 class TestBasicSubDAGs:
     """Test basic sub-DAG functionality."""
@@ -1578,8 +1553,7 @@ class TestBasicSubDAGs:
 
         # Check sub-DAG was created
         subdags = file_queue.conn.execute(
-            "SELECT id FROM dag_runs WHERE parent_job_id = ?",
-            [sub_id]
+            "SELECT id FROM dag_runs WHERE parent_job_id = ?", [sub_id]
         ).fetchall()
 
         assert len(subdags) == 1
@@ -1588,6 +1562,7 @@ class TestBasicSubDAGs:
 # ============================================================================
 # Hierarchy Tests
 # ============================================================================
+
 
 class TestDAGHierarchy:
     """Test DAG parent-child relationships."""
@@ -1629,19 +1604,21 @@ class TestDAGHierarchy:
         dag_run = DAGRun(file_queue, main.dag_run_id)
         hierarchy = dag_run.get_hierarchy()
 
-        assert hierarchy['name'] == 'main'
-        assert len(hierarchy['subdags']) == 2
+        assert hierarchy["name"] == "main"
+        assert len(hierarchy["subdags"]) == 2
 
 
 # ============================================================================
 # Execution Tests
 # ============================================================================
 
+
 def create_sub(q):
     dag = DAG("sub", q)
     dag.add_job(noop, name="job1")
     dag.add_job(noop, name="job2")
     return dag
+
 
 def create_failing_sub(q):
     dag = DAG("failing_sub", q)
@@ -1699,6 +1676,7 @@ class TestSubDAGExecution:
 # Complex Workflow Tests
 # ============================================================================
 
+
 def create_etl(q):
     dag = DAG("etl", q)
     dag.add_job(extract_data, name="extract")
@@ -1706,16 +1684,19 @@ def create_etl(q):
     dag.add_job(load_data, name="load", depends_on="transform")
     return dag
 
+
 def create_leaf(q):
     dag = DAG("leaf", q)
     dag.add_job(noop, name="job1")
     return dag
+
 
 def create_branch(q):
     dag = DAG("branch", q)
     dag.add_subdag(create_leaf, name="leaf1")
     dag.add_subdag(create_leaf, name="leaf2")
     return dag
+
 
 class TestComplexSubDAGWorkflows:
     """Test complex workflows with sub-DAGs."""
@@ -1753,13 +1734,14 @@ class TestComplexSubDAGWorkflows:
         dag_run = DAGRun(file_queue, main.dag_run_id)
         hierarchy = dag_run.get_hierarchy()
 
-        assert len(hierarchy['subdags']) == 1
-        assert len(hierarchy['subdags'][0]['subdags']) == 2
+        assert len(hierarchy["subdags"]) == 1
+        assert len(hierarchy["subdags"][0]["subdags"]) == 2
 
 
 # ============================================================================
 # Mermaid Export Tests
 # ============================================================================
+
 
 class TestSubDAGMermaidExport:
     """Test Mermaid diagram export with sub-DAGs."""

@@ -878,7 +878,9 @@ class TestWorker:
         # Allow for race conditions in concurrent execution
         stats = queue.stats()
         done = stats["done"]
-        assert done >= 3, f"Expected at least 3 jobs completed, got {done}. Stats: {stats}"
+        assert done >= 3, (
+            f"Expected at least 3 jobs completed, got {done}. Stats: {stats}"
+        )
 
     def test_worker_concurrent_backpressure(self, queue: DuckQueue):
         worker = Worker(queue, concurrency=2, max_jobs_in_flight=2)
@@ -909,7 +911,9 @@ class TestWorker:
         # Allow for race conditions in concurrent exception handling
         stats = queue.stats()
         failed = stats["failed"]
-        assert failed >= 2, f"Expected at least 2 jobs failed, got {failed}. Stats: {stats}"
+        assert failed >= 2, (
+            f"Expected at least 2 jobs failed, got {failed}. Stats: {stats}"
+        )
 
     def test_worker_concurrent_timeout(self, queue: DuckQueue):
         worker = Worker(queue, concurrency=2)
@@ -1204,7 +1208,9 @@ class TestIntegration:
         # Verify all jobs completed successfully
         stats = queue.stats()
         completed = stats.get("done", 0)
-        assert completed == 10, f"Expected 10 jobs completed, got {completed}. Stats: {stats}"
+        assert completed == 10, (
+            f"Expected 10 jobs completed, got {completed}. Stats: {stats}"
+        )
 
 
 # ============================================================================
@@ -1504,7 +1510,9 @@ class TestContextManager:
             else:
                 # Final check with detailed error message
                 stats = q.stats()
-                assert stats["done"] + stats["claimed"] > 0, f"No jobs processed after {max_wait}s: {stats}"
+                assert stats["done"] + stats["claimed"] > 0, (
+                    f"No jobs processed after {max_wait}s: {stats}"
+                )
 
     def test_context_manager_auto_start_workers(self):
         """Test workers are auto-started in context manager."""
@@ -1707,7 +1715,9 @@ class TestNewFeaturesIntegration:
         reset_flaky_counter()
 
         with DuckQueue(":memory:", workers_num=1) as q:
-            job_id = q.enqueue(flaky_task, max_attempts=3)  # Need 3 attempts for flaky_task to succeed
+            job_id = q.enqueue(
+                flaky_task, max_attempts=3
+            )  # Need 3 attempts for flaky_task to succeed
 
             # Wait for retries and eventual success
             time.sleep(2)  # Give more time for retries

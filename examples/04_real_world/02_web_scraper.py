@@ -210,7 +210,9 @@ with DAG("web_scraping") as dag:
         scrape_jobs.append(f"scrape_{url.split('/')[-1]}")
 
     # Save results after all scraping is done
-    dag.add_node(save_results, args=(scrape_jobs,), name="save_results", depends_on=scrape_jobs)
+    dag.add_node(
+        save_results, args=(scrape_jobs,), name="save_results", depends_on=scrape_jobs
+    )
 
     print("Submitting web scraping DAG and waiting for completion...")
     dag.submit()
