@@ -1,0 +1,15 @@
+name: Code Quality
+on: [push, pull_request]
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    name: Analyze the repo with CodeSee
+    steps:
+      - uses: actions/checkout@v5
+      - name: Analyze with CodeSee
+        uses: Codesee-io/codesee-action@v2
+        with:
+          codesee-token: ${{ secrets.CODESEE_ARCH_DIAG_API_TOKEN }}
+          codesee-url: https://app.codesee.io
