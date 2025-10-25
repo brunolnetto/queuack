@@ -1183,3 +1183,4 @@ class TestComprehensiveIntegration:
                 os.unlink(db_path)
             except:
                 pass
+

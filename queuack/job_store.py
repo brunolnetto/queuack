@@ -1,4 +1,4 @@
-# file: job_models.py
+# file: job_store.py
 
 from __future__ import annotations
 
@@ -142,19 +142,18 @@ class DuckQueueAdapter(JobStore):
         sql = f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?"
         params.append(job_id)
 
-        with self.queue._db_lock:
-            if is_skipped_update:
-                # Append attempts = max_attempts to the SET clause
-                sql = sql.replace(
-                    "WHERE id = ?", ", attempts = max_attempts WHERE id = ?"
-                )
 
-            self.queue.conn.execute(sql, params)
+        if is_skipped_update:
+            # Append attempts = max_attempts to the SET clause
+            sql = sql.replace(
+                "WHERE id = ?", ", attempts = max_attempts WHERE id = ?"
+            )
+
+        self.queue.conn.execute(sql, params)
 
     def bulk_update(self, updates: Iterable[Dict[str, Any]]) -> None:
-        with self.queue._db_lock:
-            for upd in updates:
-                job_id = upd.pop("id", None)
-                if not job_id:
-                    continue
-                self.update_job_status(job_id, **upd)
+        for upd in updates:
+            job_id = upd.pop("id", None)
+            if not job_id:
+                continue
+            self.update_job_status(job_id, **upd)
