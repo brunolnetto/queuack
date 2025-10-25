@@ -10,14 +10,15 @@ def migrate_queue(source_db: str, target_db: str, queue_name: str = None):
     source = DuckQueue(source_db)
     target = DuckQueue(target_db)
 
-    with source._db_lock:
-        if queue_name:
-            query = "SELECT * FROM jobs WHERE queue = ? AND status = 'pending'"
-            results = source.conn.execute(query, [queue_name]).fetchall()
-        else:
-            results = source.conn.execute(
-                "SELECT * FROM jobs WHERE status = 'pending'"
-            ).fetchall()
+    if queue_name:
+        query = "SELECT * FROM jobs WHERE queue = ? AND status = 'pending'"
+        results = source.conn.execute(query, [queue_name]).fetchall()
+    else:
+        results = source.conn.execute(
+            "SELECT * FROM jobs WHERE status = 'pending'"
+        ).fetchall()
+
+    source.conn.commit()
 
     migrated = 0
     for row in results:

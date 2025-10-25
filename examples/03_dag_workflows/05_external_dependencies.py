@@ -47,11 +47,7 @@ Advanced Topics:
 # Difficulty: advanced
 """
 
-from examples.utils.tempfile import create_temp_path
-from queuack import DuckQueue
-
-db_path = create_temp_path("external")
-queue = DuckQueue(db_path)
+from queuack import DAG
 
 
 def external_processing_func() -> None:
@@ -66,48 +62,27 @@ def finalize_func() -> None:
     print("📤 Finalize")
 
 
-# Create an external job first
-external_job_id = queue.enqueue(
-    external_processing_func
-    # Removed queue="preprocessing" to use default queue
-)
+with DAG("depends_on_external") as dag:
+    # Create an external job first on the same queue used by the DAG
+    external_job_id = dag.queue.enqueue(
+        external_processing_func
+    )
 
-print(f"📋 Created external job: {external_job_id[:8]}")
+    print(f"📋 Created external job: {external_job_id[:8]}")
 
-# DAG depends on external job
-with queue.dag("depends_on_external") as dag:
+    # DAG depends on external job
     # Reference external job by ID
-    process = dag.enqueue(
+    process = dag.add_node(
         main_processing_func,
         name="process",
         depends_on=external_job_id,  # UUID string
     )
 
-    finalize = dag.enqueue(finalize_func, name="finalize", depends_on="process")
+    finalize = dag.add_node(finalize_func, name="finalize", depends_on="process")
 
-print("✓ DAG with external dependency submitted")
+    dag.submit()
+    print("✓ DAG with external dependency submitted")
 
-# Execute the DAG jobs
-print("\n🚀 Executing DAG jobs...")
-import time
-
-processed = 0
-expected_jobs = 3  # external + process + finalize
-while processed < expected_jobs:
-    job = queue.claim()
-    if job:
-        processed += 1
-        print(f"📋 Processing job #{processed}: {job.id[:8]}")
-
-        try:
-            result = job.execute()
-            queue.ack(job.id, result=result)
-            print(f"✅ Completed job #{processed}")
-        except Exception as e:
-            queue.ack(job.id, error=str(e))
-            print(f"❌ Failed job #{processed}: {e}")
-    else:
-        print("⏳ Waiting for jobs...")
-        time.sleep(0.5)
+    dag.wait_for_completion()
 
 print("\n🎉 DAG execution complete!")

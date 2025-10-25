@@ -36,13 +36,12 @@ def list_jobs(ctx, limit):
     """List recent jobs."""
     queue = ctx.obj["queue"]
 
-    with queue._db_lock:
-        results = queue.conn.execute(f"""
-            SELECT id, status, created_at, queue
-            FROM jobs
-            ORDER BY created_at DESC
-            LIMIT {limit}
-        """).fetchall()
+    results = queue.conn.execute(f"""
+        SELECT id, status, created_at, queue
+        FROM jobs
+        ORDER BY created_at DESC
+        LIMIT {limit}
+    """).fetchall()
 
     table = [[r[0][:8], r[1], r[2], r[3]] for r in results]
     print(
@@ -215,10 +214,10 @@ if __name__ == "__main__":
         worker = Worker(queue, queues=["demo"], concurrency=2)
 
         def run_worker_briefly():
-            start_time = time.time()
+            start_time = time.perf_counter()
             job_count = 0
             while (
-                time.time() - start_time < 3 and job_count < 10
+                time.perf_counter() - start_time < 3 and job_count < 10
             ):  # Run for 3 seconds or 10 jobs max
                 job = worker._claim_next_job()
                 if job:
@@ -237,13 +236,13 @@ if __name__ == "__main__":
         print(tabulate(table, headers=["Status", "Count"], tablefmt="grid"))
 
         print("\n📋 Recent jobs:")
-        with queue._db_lock:
-            results = queue.conn.execute("""
-                SELECT id, status, queue, created_at
-                FROM jobs
-                ORDER BY created_at DESC
-                LIMIT 10
-            """).fetchall()
+        results = queue.conn.execute("""
+            SELECT id, status, queue, created_at
+            FROM jobs
+            ORDER BY created_at DESC
+            LIMIT 10
+        """).fetchall()
+        queue.conn.commit()
 
         job_table = [[r[0][:8], r[1], r[2], str(r[3])[:19]] for r in results]
         print(

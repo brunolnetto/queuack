@@ -3,13 +3,12 @@
 # Difficulty: advanced
 """
 
-import json
-import os
-import random
 import time
-
-from examples.utils.tempfile import create_temp_path
+import json
+import random
+import os
 from queuack import DuckQueue
+from examples.utils.tempfile import create_temp_path
 
 
 def _write_json(path, obj):
@@ -19,7 +18,7 @@ def _write_json(path, obj):
 
 
 def _read_json(path):
-    with open(path) as f:
+    with open(path, "r") as f:
         return json.load(f)
 
 
@@ -291,7 +290,7 @@ class ETLProcessor:
 
         # Execute the pipeline
         print("\n🏃 Executing ETL Pipeline...")
-        start_time = time.time()
+    start_time = time.perf_counter()
 
         # Process all jobs in the DAG by claiming/executing/acking manually
         jobs_completed = 0
@@ -314,7 +313,7 @@ class ETLProcessor:
                 jobs_completed += 1
                 print(f"[{jobs_completed}/{total_jobs}] Job {job.id[:8]} failed: {e}")
 
-        total_time = time.time() - start_time
+    total_time = time.perf_counter() - start_time
 
         # Display results
         print("📊 ETL Pipeline Results:")

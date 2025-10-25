@@ -10,10 +10,10 @@ def benchmark_enqueue(num_jobs=1000):
     """Benchmark enqueue throughput."""
     queue = DuckQueue(":memory:")
 
-    start = time.time()
+    start = time.perf_counter()
     for i in range(num_jobs):
         queue.enqueue(lambda x: x, args=(i,))
-    duration = time.time() - start
+    duration = time.perf_counter() - start
 
     throughput = num_jobs / duration
     print(f"Enqueue: {throughput:.0f} jobs/sec")
@@ -29,13 +29,13 @@ def benchmark_claim_ack(num_jobs=1000):
         queue.enqueue(lambda x: x, args=(i,))
 
     # Benchmark
-    start = time.time()
+    start = time.perf_counter()
     for _ in range(num_jobs):
         job = queue.claim()
         if job:
             result = job.execute()
             queue.ack(job.id, result=result)
-    duration = time.time() - start
+    duration = time.perf_counter() - start
 
     throughput = num_jobs / duration
     print(f"Claim+Ack: {throughput:.0f} jobs/sec")
@@ -53,7 +53,7 @@ def benchmark_concurrent(num_jobs=1000, concurrency=4):
     # Process concurrently
     from queuack import Worker
 
-    start = time.time()
+    start = time.perf_counter()
 
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = []
@@ -62,7 +62,7 @@ def benchmark_concurrent(num_jobs=1000, concurrency=4):
             future = executor.submit(worker.run, poll_interval=0.1)
             futures.append(future)
 
-    duration = time.time() - start
+    duration = time.perf_counter() - start
     print(f"Concurrent ({concurrency} workers): {num_jobs / duration:.0f} jobs/sec")
 
 

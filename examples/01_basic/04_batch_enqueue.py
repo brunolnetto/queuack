@@ -20,4 +20,4 @@ jobs = [(process_user, (i,), {}) for i in range(10)]
 job_ids = queue.enqueue_batch(jobs)
 
 print(f"Enqueued {len(job_ids)} jobs")
-print(queue.stats())  # {'pending': 1000, ...}
+print(queue.stats())  # {'pending': 10, ...}

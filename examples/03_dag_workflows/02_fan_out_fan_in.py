@@ -39,11 +39,7 @@ Queuack Features Demonstrated:
 # Difficulty: intermediate
 """
 
-from examples.utils.tempfile import create_temp_path
-from queuack import DuckQueue
-
-db_path = create_temp_path("fanout")
-queue = DuckQueue(db_path)
+from queuack import DAG
 
 print("🦆 Fan-out/Fan-in DAG Example")
 print("============================")
@@ -85,54 +81,37 @@ print("   - process_0, process_1, process_2: parallel jobs")
 print("   - aggregate: synchronization point")
 print()
 
-with queue.dag("fan_out_fan_in") as dag:
-    extract_job = dag.enqueue(extract, name="extract")
+with DAG("fan_out_fan_in") as dag:
+    extract_job = dag.add_node(extract, name="extract")
 
     # Fan out: 3 parallel processes
     process_jobs = []
     for i in range(3):
-        job = dag.enqueue(
+        job = dag.add_node(
             process_partition, args=(i,), name=f"process_{i}", depends_on="extract"
         )
         process_jobs.append(f"process_{i}")
 
     # Fan in: aggregate waits for all
-    dag.enqueue(
+    dag.add_node(
         aggregate,
         name="aggregate",
         depends_on=process_jobs,  # Waits for all 3
     )
 
-print("✓ Fan-out/fan-in DAG submitted")
-print("Execution levels:", dag.get_execution_order())
-print()
+    dag.submit
+    print("✓ Fan-out/fan-in DAG submitted")
+    print("Execution levels:", dag.get_execution_order())
+    print()
 
-# Execute the DAG jobs
-print("🚀 Executing DAG jobs...")
-print("Watch for parallel processing of partitions!")
-print()
 
-# Execute the DAG jobs
-print("\n🚀 Executing DAG jobs...")
-import time
 
-processed = 0
-expected_jobs = 5  # extract + 3 process + 1 aggregate
-while processed < expected_jobs:
-    job = queue.claim()
-    if job:
-        processed += 1
-        print(f"📋 Processing job #{processed}: {job.id[:8]}")
+    # Execute the DAG jobs
+    print("🚀 Executing DAG jobs...")
+    print("Watch for parallel processing of partitions!")
+    print()
 
-        try:
-            result = job.execute()
-            queue.ack(job.id, result=result)
-            print(f"✅ Completed job #{processed}")
-        except Exception as e:
-            queue.ack(job.id, error=str(e))
-            print(f"❌ Failed job #{processed}: {e}")
-    else:
-        print("⏳ Waiting for jobs...")
-        time.sleep(0.5)
+    dag.submit()
+    dag.wait_for_completion()
 
 print("\n🎉 DAG execution complete!")

@@ -39,7 +39,7 @@ def simulate_distributed_worker(worker_id: str, db_path: str):
     )
 
     # Process jobs for a limited time
-    start_time = time.time()
+    start_time = time.perf_counter()
     jobs_processed = 0
 
     # Enqueue some work for this worker

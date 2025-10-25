@@ -266,7 +266,7 @@ def simulate_workload():
 
 def process_job_impl(job_id: int):
     """Top-level worker job implementation (picklable)."""
-    start_time = time.time()
+    start_time = time.perf_counter()
     job_type = random.choice(["fast", "medium", "slow", "error"])
     if job_type == "fast":
         time.sleep(random.uniform(0.1, 0.5))
@@ -278,7 +278,7 @@ def process_job_impl(job_id: int):
         time.sleep(random.uniform(0.1, 0.5))
         raise Exception(f"Simulated error in job {job_id}")
 
-    processing_time = time.time() - start_time
+    processing_time = time.perf_counter() - start_time
     return f"Job {job_id} completed in {processing_time:.2f}s"
 
 
