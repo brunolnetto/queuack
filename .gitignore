@@ -2,6 +2,7 @@
 codecov
 uv.lock
 .python_version
+*.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
