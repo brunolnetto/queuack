@@ -2,7 +2,12 @@ from pathlib import Path
 import json
 import uuid
 
-from queuack import DAG, TaskContext, streaming_task
+from queuack import (
+    DAG, 
+    DuckQueue, 
+    TaskContext, 
+    streaming_task,
+)
 
 RESULTS_DIR = Path(__file__).parent / "results_spark"
 RESULTS_DIR.mkdir(exist_ok=True)
@@ -67,14 +72,28 @@ def load(context: TaskContext):
     
     return {"count": count, "avg": total / count}
 
+def create_dag_etl(queue: DuckQueue) -> DAG:
+    dag = DAG("etl", queue)
+
+    dag.add_node(extract, name="extract")
+    dag.add_node(transform, name="transform", depends_on="extract")
+    dag.add_node(load, name="load", depends_on="transform")
+
+    return dag
+
+def teardown(context: TaskContext):
+    if _SPARK:
+        _SPARK.stop()
+
 if __name__ == "__main__":
     # Clean, expressive API
     with DAG("spark_etl").with_timing() as dag:
+        etl_dag = DAG("ETL Pipeline")
+
         dag.add_node(startup, name="startup")
-        dag.add_node(extract, name="extract", depends_on='startup')
-        dag.add_node(transform, name="transform", depends_on="extract")
-        dag.add_node(load, name="load", depends_on="transform")
-        
+        dag.add_node(create_dag_etl, name="etl_subdag", depends_on='startup')
+        dag.add_node(teardown, name="teardown", depends_on="etl_subdag")
+
         success = dag.execute()
     
     if success:
@@ -84,5 +103,3 @@ if __name__ == "__main__":
             stats = pickle.loads(result.result)
             print(f"\nFinal: {stats}")
     
-    if _SPARK:
-        _SPARK.stop()
