@@ -12,9 +12,11 @@ dependencies = [
 
 [dependency-groups]
 test = [
-"pytest>=8.4.2",
-"pytest-cov>=7.0.0",
-"pytest-watch>=4.2.0",]
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+    "pytest-watch>=4.2.0",
+    "pytest-xdist>=3.8.0",
+]
 
 lint = [
 "ruff>=0.14.1",
@@ -28,7 +30,9 @@ web = [
 "flask-socketio>=5.5.1",]
 
 data = [
-"pandas>=2.3.3",]
+    "pandas>=2.3.3",
+    "pyspark>=4.0.1",
+]
 
 imaging = [
 "pillow>=11.3.0",]
