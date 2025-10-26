@@ -1480,6 +1480,7 @@ class DAG:
         description: Optional[str] = None,
         validate: Optional[bool] = True,
         fail_fast: Optional[bool] = True,
+        timing: Optional[bool] = False,
     ):
         """Create a new DAG.
 
@@ -1502,6 +1503,7 @@ class DAG:
         self.description = description
         self._validate_on_submit = validate
         self._fail_fast = fail_fast
+        self._timing_enabled = timing
 
         # If no queue was provided, create and own a DuckQueue instance so
         # the DAG can manage the queue lifecycle (start/stop workers,
@@ -1841,6 +1843,145 @@ class DAG:
                     print(f"Warning: {w}")
         """
         return self._context.validate()
+    
+    def with_timing(self, enabled: bool = True) -> "DAG":
+        """Enable automatic timing logs for all task executions.
+        
+        When enabled, each task will log its execution duration automatically.
+        Useful for profiling pipelines and identifying bottlenecks.
+        
+        Args:
+            enabled: If True, log timing for each task execution
+        
+        Returns:
+            Self for method chaining
+        
+        Example:
+            with DAG("pipeline").with_timing() as dag:
+                dag.add_node(extract, name="extract")
+                dag.add_node(transform, name="transform", depends_on="extract")
+                dag.execute()
+            
+            # Output:
+            # ✅ extract (0.15s)
+            # ✅ transform (2.18s)
+        """
+        self._timing_enabled = enabled
+        return self
+    
+    def execute(
+        self,
+        poll_interval: float = 0.1,
+        timeout: Optional[float] = None,
+        show_progress: bool = False,
+    ) -> bool:
+        """Execute DAG synchronously in the current process.
+        
+        This method processes jobs sequentially without background workers,
+        making it ideal for:
+        - Integration with external frameworks (PySpark, Dask, Ray)
+        - Debugging and development
+        - Environments where threading is problematic
+        - Simple scripts that don't need parallelism
+        
+        Args:
+            poll_interval: Seconds to wait between job claim attempts
+            timeout: Maximum execution time in seconds (None = unlimited)
+            show_progress: If True, print progress updates periodically
+        
+        Returns:
+            True if DAG completed successfully, False if failed or timed out
+        
+        Raises:
+            RuntimeError: If DAG not yet submitted
+        
+        Example - Basic usage:
+            with DAG("pipeline") as dag:
+                dag.add_node(extract, name="extract")
+                dag.add_node(transform, name="transform", depends_on="extract")
+            
+            if dag.execute():
+                print("Pipeline succeeded!")
+            else:
+                print(f"Pipeline failed: {dag.status}")
+        
+        Example - With progress:
+            dag.execute(show_progress=True, poll_interval=0.5)
+            # Progress: 2/5 jobs complete (40%)
+            # Progress: 4/5 jobs complete (80%)
+        
+        Example - With timeout:
+            if not dag.execute(timeout=300):
+                print("Pipeline timed out after 5 minutes")
+        """
+        if not self._submitted:
+            self.submit()
+        
+        import time
+        
+        start_time = time.perf_counter()
+        last_progress_time = start_time
+        progress_interval = 5.0  # Show progress every 5s
+        
+        while not self.is_complete():
+            # Timeout check
+            elapsed = time.perf_counter() - start_time
+            if timeout and elapsed >= timeout:
+                self.queue.logger.warning(
+                    f"DAG '{self.name}' timed out after {timeout:.1f}s"
+                )
+                self.update_status()
+                return False
+            
+            # Progress reporting
+            if show_progress and (time.perf_counter() - last_progress_time) >= progress_interval:
+                p = self.progress
+                total = sum(p.values())
+                done = p.get('done', 0)
+                if total > 0:
+                    pct = (done / total) * 100
+                    print(f"Progress: {done}/{total} jobs complete ({pct:.0f}%)")
+                last_progress_time = time.perf_counter()
+            
+            # Claim and execute next job
+            job = self.queue.claim()
+            if job:
+                job_start = time.perf_counter()
+                job_name = getattr(job, 'node_name', None) or job.id[:8]
+                
+                try:
+                    result = job.execute(logger=self.queue.logger)
+                    self.queue.ack(job.id, result=result)
+                    
+                    # Timing log if enabled
+                    if self._timing_enabled:
+                        duration = time.perf_counter() - job_start
+                        print(f"✅ {job_name} ({duration:.2f}s)")
+                
+                except Exception as e:
+                    import traceback
+                    error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+                    self.queue.ack(job.id, error=error)
+                    
+                    if self._timing_enabled:
+                        duration = time.perf_counter() - job_start
+                        print(f"❌ {job_name} failed ({duration:.2f}s)")
+                    
+                    self.queue.logger.error(f"Job {job_name} failed: {e}")
+            else:
+                time.sleep(poll_interval)
+        
+        # Final update
+        self.update_status()
+        
+        # Show final progress if enabled
+        if show_progress:
+            p = self.progress
+            total = sum(p.values())
+            print(f"Complete: {p.get('done', 0)}/{total} succeeded, "
+                  f"{p.get('failed', 0)} failed, {p.get('skipped', 0)} skipped")
+        
+        return self.status == DAGRunStatus.DONE
 
     @property
     def dag_run_id(self) -> Optional[str]:

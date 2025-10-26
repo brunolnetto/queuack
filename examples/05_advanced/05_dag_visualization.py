@@ -290,7 +290,7 @@ class ETLProcessor:
 
         # Execute the pipeline
         print("\n🏃 Executing ETL Pipeline...")
-    start_time = time.perf_counter()
+        start_time = time.perf_counter()
 
         # Process all jobs in the DAG by claiming/executing/acking manually
         jobs_completed = 0
@@ -313,7 +313,7 @@ class ETLProcessor:
                 jobs_completed += 1
                 print(f"[{jobs_completed}/{total_jobs}] Job {job.id[:8]} failed: {e}")
 
-    total_time = time.perf_counter() - start_time
+        total_time = time.perf_counter() - start_time
 
         # Display results
         print("📊 ETL Pipeline Results:")

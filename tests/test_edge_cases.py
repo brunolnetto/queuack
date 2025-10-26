@@ -4,29 +4,26 @@ Tests to improve code coverage for previously uncovered areas.
 This module focuses on testing error paths, edge cases, and utility functions
 that weren't covered by the main test suite.
 """
-
 import os
 import tempfile
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
 from queuack import (
-    DAGValidationError,
-    DuckQueue,
-    WorkerPool,
-    close_default_queue,
     get_default_queue,
+    close_default_queue,
+    DuckQueue,
+    Worker,
+    WorkerPool,
+    DAGValidationError,
 )
+from queuack.data_models import BackpressureError
 from queuack.core import ConnectionPool
-from queuack.data_models import BackpressureError, JobSpec
-from queuack.status import (
-    JobStatus,
-    NodeStatus,
-    job_status_to_node_status,
-    node_status_to_job_status,
-)
+from queuack.data_models import Job, JobSpec
+from queuack.status import JobStatus, NodeStatus, job_status_to_node_status, node_status_to_job_status
 
 
 def simple_task():
@@ -78,10 +75,7 @@ class TestStatusConversions:
     def test_job_status_to_node_status_conversions(self):
         """Test all job status to node status conversions."""
         assert job_status_to_node_status(JobStatus.PENDING) == NodeStatus.PENDING
-        assert (
-            job_status_to_node_status(JobStatus.CLAIMED, claimed_started=True)
-            == NodeStatus.RUNNING
-        )
+        assert job_status_to_node_status(JobStatus.CLAIMED, claimed_started=True) == NodeStatus.RUNNING
         assert job_status_to_node_status(JobStatus.DONE) == NodeStatus.DONE
         assert job_status_to_node_status(JobStatus.FAILED) == NodeStatus.FAILED
         assert job_status_to_node_status(JobStatus.DELAYED) == NodeStatus.PENDING
@@ -166,11 +160,9 @@ class TestWorkerPoolEdgeCases:
         pool.start()
         pool.stop()
 
-
 def slow_task():
     time.sleep(2)
     return "too slow"
-
 
 class TestJobExecutionEdgeCases:
     """Test edge cases in job execution."""
@@ -193,9 +185,9 @@ class TestJobExecutionEdgeCases:
         except Exception:
             pass  # Timeout expected
 
-        # Should not take full 2 seconds (allow reasonable timeout handling time)
+        # Should not take full 2 seconds
         elapsed = time.time() - start_time
-        assert elapsed < 2.5  # Should complete within reasonable timeout period
+        assert elapsed < 1.0
 
     def test_job_with_max_attempts(self):
         """Test job with max attempts."""
@@ -293,8 +285,8 @@ class TestConcurrencyEdgeCases:
         for thread in threads:
             thread.join()
 
-        # Should have successfully enqueued jobs (allow for some concurrency variance)
-        assert len(results) >= 10  # At least most jobs should succeed
+        # Should have successfully enqueued jobs
+        assert len(results) == 15  # 3 threads * 5 jobs each
         assert len(errors) == 0
 
     def test_concurrent_claim_operations(self):
@@ -346,7 +338,7 @@ class TestJobSpecEdgeCases:
             name="test_job",
             priority=5,
             timeout_seconds=30,
-            max_attempts=3,
+            max_attempts=3
         )
 
         assert spec.func == simple_task
@@ -361,7 +353,7 @@ class TestJobSpecEdgeCases:
 @pytest.fixture
 def temp_db():
     """Create a temporary database file that doesn't exist initially."""
-    fd, path = tempfile.mkstemp(suffix=".db")
+    fd, path = tempfile.mkstemp(suffix='.db')
     os.close(fd)
     os.unlink(path)  # Remove the file, keep just the path
     yield path

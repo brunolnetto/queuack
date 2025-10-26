@@ -33,6 +33,12 @@ from .status import (
     job_status_to_node_status,
     node_status_to_job_status,
 )
+from .decorators import (
+    streaming_task, 
+    timed_task, 
+    retry_task,
+)
+
 
 __all__ = [
     # core exports
@@ -52,6 +58,10 @@ __all__ = [
     "DAGRun",
     "DAGContext",
     "DAG",
+    # decorators exports
+    "streaming_task",
+    "timed_task",
+    "retry_task",
     # status exports
     "DAGRunStatus",
     "NodeStatus",

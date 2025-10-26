@@ -341,6 +341,101 @@ class TaskContext:
             )
 
         return self.get_parent_result(result[0])
+    
+    def upstream_all(self) -> Dict[str, Any]:
+        """Get all parent task results as a dictionary.
+        
+        Returns a mapping of {task_name: result} for all upstream dependencies.
+        This is useful when a task depends on multiple parents and needs to
+        access them by name rather than order.
+        
+        Returns:
+            Dict mapping parent task names to their results
+        
+        Raises:
+            ValueError: If not part of a DAG or parent lookup fails
+        
+        Example:
+            def combine_data(context):
+                parents = context.upstream_all()
+                
+                # Access by name
+                api_data = parents["fetch_api"]
+                db_data = parents["fetch_db"]
+                cache_data = parents.get("fetch_cache", None)  # Optional
+                
+                return merge(api_data, db_data, cache_data)
+        
+        Example - With validation:
+            def aggregate(context):
+                parents = context.upstream_all()
+                
+                required = {"extract_a", "extract_b", "extract_c"}
+                missing = required - set(parents.keys())
+                
+                if missing:
+                    raise ValueError(f"Missing upstream tasks: {missing}")
+                
+                return sum(parents.values())
+        """
+        if not self.dag_run_id:
+            raise ValueError(
+                "upstream_all() requires DAG context. "
+                "This job is not part of a DAG or dag_run_id is missing."
+            )
+        
+        parent_names = self.get_parent_names()
+        return {name: self.upstream(name) for name in parent_names}
+    
+    def has_upstream_any(self, *task_names: str) -> bool:
+        """Check if any of the specified upstream tasks exist.
+        
+        Args:
+            *task_names: Variable number of task names to check
+        
+        Returns:
+            True if at least one of the tasks exists upstream
+        
+        Example:
+            def process(context):
+                if context.has_upstream_any("cache", "fallback"):
+                    # Use cached or fallback data
+                    data = (context.upstream("cache") 
+                           if context.has_upstream("cache") 
+                           else context.upstream("fallback"))
+                else:
+                    # Fetch fresh data
+                    data = fetch_from_source()
+        """
+        for name in task_names:
+            if self.has_upstream(name):
+                return True
+        return False
+    
+    def upstream_or(self, task_name: str, default: Any = None) -> Any:
+        """Get upstream result with a default fallback.
+        
+        Args:
+            task_name: Name of upstream task
+            default: Value to return if task doesn't exist
+        
+        Returns:
+            Task result or default value
+        
+        Example:
+            def process(context):
+                # Use cached data if available, else None
+                cached = context.upstream_or("cache", default=None)
+                
+                if cached:
+                    return process_cached(cached)
+                else:
+                    return process_fresh()
+        """
+        try:
+            return self.upstream(task_name)
+        except (ValueError, KeyError):
+            return default
 
     def get_parent_names(self) -> List[str]:
         """Get names of all parent tasks.
