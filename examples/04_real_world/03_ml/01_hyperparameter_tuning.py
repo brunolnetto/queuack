@@ -24,8 +24,8 @@ from typing import Dict, List, Tuple
 import json
 import itertools
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from queuack import DuckQueue, Worker, DAG
 
@@ -122,7 +122,9 @@ def run_parallel_search():
     results = []
     processed = 0
 
-    # Simple processing loop (in production, use Worker.run() in separate process)
+    # Process jobs using the queue directly
+    # In production, you would run multiple Worker processes in parallel
+    # For this demo, we simulate parallel execution with a simple loop
     while processed < len(job_ids):
         job = queue.claim()
         if job:

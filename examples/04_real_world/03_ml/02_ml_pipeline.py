@@ -26,8 +26,8 @@ from typing import Dict, List
 import json
 from datetime import datetime
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from queuack import DAG, DuckQueue, TaskContext, generator_task, StreamReader
 

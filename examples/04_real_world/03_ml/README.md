@@ -98,10 +98,10 @@ dag.execute()  # All steps tracked in DuckDB
 
 ```bash
 # Example 1: Hyperparameter search
-python examples/07_mlops/01_hyperparameter_tuning.py
+python examples/04_real_world/03_ml/01_hyperparameter_tuning.py
 
 # Example 2: Complete ML pipeline
-python examples/07_mlops/02_ml_pipeline.py
+python examples/04_real_world/03_ml/02_ml_pipeline.py
 
 # Query results with SQL
 sqlite3 experiments.db "SELECT * FROM jobs WHERE status='done' ORDER BY result DESC LIMIT 10"

@@ -34,7 +34,6 @@ CATEGORY_ORDER = [
     "real_world",
     "advanced",
     "integration",
-    "mlops",
 ]
 
 DIFFICULTY_COLORS = {
@@ -194,18 +193,19 @@ class ExampleRegistry:
                 err=True
             )
             return
-        
+
         # Find all category folders (01_basic, 02_workers, etc.)
         for category_dir in sorted(self.examples_dir.glob("*_*")):
             if not category_dir.is_dir():
                 continue
-            
+
             # Extract category name (e.g., "01_basic" -> "basic")
             if match := re.match(r"\d+_(.+)", category_dir.name):
                 category = match.group(1)
-                
-                # Find all Python files in this category
-                for py_file in sorted(category_dir.glob("*.py")):
+
+                # Find all Python files in this category (including subdirectories)
+                # Use ** for recursive globbing to handle nested folders like 04_real_world/01_etl/
+                for py_file in sorted(category_dir.rglob("*.py")):
                     if not py_file.name.startswith("_"):
                         self._register_file(py_file, category)
     
