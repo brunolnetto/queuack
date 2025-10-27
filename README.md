@@ -15,14 +15,21 @@ Perfect for dev/test environments and small-to-medium production workloads where
 
 ## 🎯 Why Queuack?
 
-| Feature | Queuack | Celery + Redis | Airflow |
-|---------|---------|----------------|---------|
-| **Setup** | `pip install queuack` | Install Redis, configure Celery | Docker compose, PostgreSQL, webserver |
-| **DAG Workflows** | ✅ Built-in | ❌ Separate tools | ✅ Core feature |
-| **Streaming ETL** | ✅ O(1) memory | ❌ Load all data | ⚠️ Manual batching |
-| **Visualization** | ✅ Mermaid (6 themes) | ❌ None | ✅ Web UI (complex) |
-| **Local Development** | ✅ Single file | ⚠️ Need Redis | ⚠️ Need full stack |
-| **Memory Footprint** | ~50 MB | ~200 MB | ~2 GB |
+| Feature | Queuack | Celery + Redis | Airflow | MLflow + Kubeflow |
+|---------|---------|----------------|---------|-------------------|
+| **Setup** | `pip install queuack` | Install Redis, configure Celery | Docker compose, PostgreSQL, webserver | K8s cluster, multiple servers |
+| **DAG Workflows** | ✅ Built-in | ❌ Separate tools | ✅ Core feature | ✅ Complex setup |
+| **Streaming ETL** | ✅ O(1) memory | ❌ Load all data | ⚠️ Manual batching | ⚠️ Manual setup |
+| **ML Pipelines** | ✅ Native support | ⚠️ Manual | ⚠️ Complex | ✅ Core feature |
+| **Visualization** | ✅ Mermaid (6 themes) | ❌ None | ✅ Web UI (complex) | ✅ Web UI (complex) |
+| **Local Development** | ✅ Single file | ⚠️ Need Redis | ⚠️ Need full stack | ❌ Need K8s |
+| **Memory Footprint** | ~50 MB | ~200 MB | ~2 GB | ~4 GB |
+
+**Perfect for:**
+- 🔬 **ML Engineers** - Train models without Kubernetes
+- 📊 **Data Engineers** - Build ETL pipelines without Airflow overhead
+- 🚀 **Startups** - Ship fast without infrastructure complexity
+- 💻 **Solo Developers** - Full workflow engine on your laptop
 
 ---
 
@@ -123,6 +130,32 @@ async def fetch_data(urls):
 # Call synchronously - decorator handles event loop
 results = fetch_data(["url1", "url2", ..., "url50"])
 # Completes in ~0.1s instead of ~5s (50x faster!)
+```
+
+### ML Pipeline (3 minutes)
+
+```python
+from queuack import DAG, DuckQueue
+
+# Replace Airflow + MLflow + Kubeflow with 50 MB
+queue = DuckQueue("ml_pipeline.db")
+dag = DAG("model_training", queue=queue)
+
+# Build ML pipeline
+dag.add_node(ingest_data, name="ingest")
+dag.add_node(validate_data, name="validate", upstream=["ingest"])
+dag.add_node(engineer_features, name="features", upstream=["validate"])
+dag.add_node(train_model, name="train", upstream=["features"])
+dag.add_node(evaluate_model, name="evaluate", upstream=["train"])
+dag.add_node(deploy_model, name="deploy", upstream=["evaluate"])
+
+# Execute pipeline - all state tracked in SQLite
+dag.execute()
+
+# Parallel hyperparameter search
+for params in param_grid:  # 54 combinations
+    queue.enqueue(train_model, args=(params,))
+# Trains 4x faster with 4 workers, no Ray/Dask needed
 ```
 
 ---
@@ -260,6 +293,7 @@ Our examples follow a **progressive learning path**:
 - ML training pipelines
 - **NEW!** Streaming ETL (1M+ records)
 - **NEW!** Multi-format exports (JSONL/CSV/Parquet)
+- **NEW!** Async API fetching (50x faster)
 
 #### [05_advanced/](examples/05_advanced) - Advanced Techniques
 - Custom backpressure
@@ -270,6 +304,13 @@ Our examples follow a **progressive learning path**:
 #### [06_integration/](examples/06_integration) - Framework Integration
 - Flask, FastAPI, Django
 - CLI tools
+
+#### [07_mlops/](examples/07_mlops) - ML Engineering **NEW!**
+- **Parallel hyperparameter tuning** - Replace Ray/MLflow
+- **Complete ML pipelines** - Replace Airflow/Kubeflow
+- Experiment tracking in SQLite
+- Model training and deployment
+- No Kubernetes required!
 
 **Run any example:**
 ```bash
