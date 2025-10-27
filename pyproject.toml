@@ -16,6 +16,7 @@ test = [
     "pytest-cov>=7.0.0",
     "pytest-watch>=4.2.0",
     "pytest-xdist>=3.8.0",
+    "pytest-asyncio>=0.25.2",
 ]
 
 lint = [
@@ -68,6 +69,10 @@ ignore = [
 [tool.setuptools.packages.find]
 include = ["queuack"]
 exclude = ["images"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.tox]
 envlist = ["py311"]
