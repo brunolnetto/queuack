@@ -1071,79 +1071,79 @@ class DuckQueue:
         """Single attempt to claim multiple jobs."""
         now = datetime.now()
 
-        # Promote delayed jobs
-        self.conn.execute(
-            """
-            UPDATE jobs
-            SET status = 'pending'
-            WHERE status = 'delayed'
-            AND execute_after <= ?
-        """,
-            [now],
-        )
-        self.conn.commit()
-
-        # Claim multiple jobs in ONE transaction
-        cursor = self.conn.execute(
-            """
-            WITH claimable AS (
-                SELECT j.id
-                FROM jobs AS j
-                WHERE j.queue = ?
-                AND (
-                    j.status = 'pending'
-                    OR (j.status = 'claimed' AND j.claimed_at < ?)
-                )
-                AND j.attempts < j.max_attempts
-                AND (j.execute_after IS NULL OR j.execute_after <= ?)
-                AND (
-                    NOT EXISTS (
-                        SELECT 1 FROM job_dependencies jd
-                        WHERE jd.child_job_id = j.id
-                    )
-                    OR
-                    (j.dependency_mode = 'all' AND NOT EXISTS (
-                        SELECT 1 FROM job_dependencies jd
-                        JOIN jobs pj ON jd.parent_job_id = pj.id
-                        WHERE jd.child_job_id = j.id
-                        AND pj.status != 'done'
-                    ))
-                    OR
-                    (j.dependency_mode = 'any' AND EXISTS (
-                        SELECT 1 FROM job_dependencies jd
-                        JOIN jobs pj ON jd.parent_job_id = pj.id
-                        WHERE jd.child_job_id = j.id
-                        AND pj.status = 'done'
-                    ))
-                )
-                ORDER BY j.priority DESC, j.created_at ASC
-                LIMIT ?
+        with self.connection_context() as conn:
+            # Promote delayed jobs
+            conn.execute(
+                """
+                UPDATE jobs
+                SET status = 'pending'
+                WHERE status = 'delayed'
+                AND execute_after <= ?
+            """,
+                [now],
             )
-            UPDATE jobs
-            SET 
-                status = 'claimed',
-                claimed_at = ?,
-                claimed_by = ?,
-                attempts = attempts + 1
-            WHERE id IN (SELECT id FROM claimable)
-            RETURNING *
-        """,
-            [
-                queue,
-                now - timedelta(seconds=claim_timeout),
-                now,
-                count,
-                now,
-                worker_id,
-            ],
-        )
 
-        # CRITICAL FIX: Fetch BEFORE commit
-        results = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            # Claim multiple jobs in ONE transaction
+            cursor = conn.execute(
+                """
+                WITH claimable AS (
+                    SELECT j.id
+                    FROM jobs AS j
+                    WHERE j.queue = ?
+                    AND (
+                        j.status = 'pending'
+                        OR (j.status = 'claimed' AND j.claimed_at < ?)
+                    )
+                    AND j.attempts < j.max_attempts
+                    AND (j.execute_after IS NULL OR j.execute_after <= ?)
+                    AND (
+                        NOT EXISTS (
+                            SELECT 1 FROM job_dependencies jd
+                            WHERE jd.child_job_id = j.id
+                        )
+                        OR
+                        (j.dependency_mode = 'all' AND NOT EXISTS (
+                            SELECT 1 FROM job_dependencies jd
+                            JOIN jobs pj ON jd.parent_job_id = pj.id
+                            WHERE jd.child_job_id = j.id
+                            AND pj.status != 'done'
+                        ))
+                        OR
+                        (j.dependency_mode = 'any' AND EXISTS (
+                            SELECT 1 FROM job_dependencies jd
+                            JOIN jobs pj ON jd.parent_job_id = pj.id
+                            WHERE jd.child_job_id = j.id
+                            AND pj.status = 'done'
+                        ))
+                    )
+                    ORDER BY j.priority DESC, j.created_at ASC
+                    LIMIT ?
+                )
+                UPDATE jobs
+                SET
+                    status = 'claimed',
+                    claimed_at = ?,
+                    claimed_by = ?,
+                    attempts = attempts + 1
+                WHERE id IN (SELECT id FROM claimable)
+                RETURNING *
+            """,
+                [
+                    queue,
+                    now - timedelta(seconds=claim_timeout),
+                    now,
+                    count,
+                    now,
+                    worker_id,
+                ],
+            )
 
-        # Commit AFTER fetching
-        self.conn.commit()
+            # CRITICAL FIX: Fetch BEFORE commit
+            results = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+
+            # Commit AFTER fetching
+            conn.commit()
 
         if not results:
             return []
@@ -1256,63 +1256,64 @@ class DuckQueue:
                     # Propagate permanent failure to descendants
                     try:
                         # Iteratively propagate SKIPPED to transitive descendants
-                        while True:
-                            updated = self.conn.execute(
-                                """
-                                WITH RECURSIVE descendants(child_id) AS (
-                                    SELECT child_job_id FROM job_dependencies WHERE parent_job_id = ?
-                                    UNION ALL
-                                    SELECT jd.child_job_id FROM job_dependencies jd
-                                    JOIN descendants d ON jd.parent_job_id = d.child_id
-                                ), dlist AS (
-                                    SELECT DISTINCT child_id AS id FROM descendants
-                                ), parents AS (
-                                    SELECT
-                                        child.id AS id,
-                                        child.dependency_mode AS dependency_mode,
-                                        SUM(CASE WHEN pj.status NOT IN ('failed','skipped') THEN 1 ELSE 0 END) AS healthy_parents,
-                                        COUNT(*) AS parent_count
-                                    FROM dlist
-                                    JOIN jobs child ON child.id = dlist.id
-                                    JOIN job_dependencies jd ON jd.child_job_id = child.id
-                                    JOIN jobs pj ON pj.id = jd.parent_job_id
-                                    GROUP BY child.id, child.dependency_mode
-                                ), should_skip AS (
-                                    SELECT
-                                        id,
-                                        CASE
-                                            WHEN dependency_mode = 'all' AND healthy_parents < parent_count THEN 1
-                                            WHEN dependency_mode = 'any' AND parent_count > 0 AND healthy_parents = 0 THEN 1
-                                            ELSE 0
-                                        END AS skip_flag
-                                    FROM parents
-                                )
-                                UPDATE jobs
-                                SET
-                                    status = 'skipped',
-                                    skipped_at = ?,
-                                    skip_reason = ?,
-                                    skipped_by = ?,
-                                    attempts = max_attempts,
-                                    completed_at = ?
-                                FROM should_skip ss
-                                WHERE jobs.id = ss.id
-                                AND ss.skip_flag = 1
-                                AND jobs.status NOT IN ('done','failed','skipped')
-                                RETURNING jobs.id
-                            """,
-                                [
-                                    job_id,
-                                    now,
-                                    f"parent_failed:{job_id}",
-                                    "queuack",
-                                    now,
-                                ],
-                            ).fetchall()
-                            self.conn.commit()
+                        with self.connection_context() as conn:
+                            while True:
+                                updated = conn.execute(
+                                    """
+                                    WITH RECURSIVE descendants(child_id) AS (
+                                        SELECT child_job_id FROM job_dependencies WHERE parent_job_id = ?
+                                        UNION ALL
+                                        SELECT jd.child_job_id FROM job_dependencies jd
+                                        JOIN descendants d ON jd.parent_job_id = d.child_id
+                                    ), dlist AS (
+                                        SELECT DISTINCT child_id AS id FROM descendants
+                                    ), parents AS (
+                                        SELECT
+                                            child.id AS id,
+                                            child.dependency_mode AS dependency_mode,
+                                            SUM(CASE WHEN pj.status NOT IN ('failed','skipped') THEN 1 ELSE 0 END) AS healthy_parents,
+                                            COUNT(*) AS parent_count
+                                        FROM dlist
+                                        JOIN jobs child ON child.id = dlist.id
+                                        JOIN job_dependencies jd ON jd.child_job_id = child.id
+                                        JOIN jobs pj ON pj.id = jd.parent_job_id
+                                        GROUP BY child.id, child.dependency_mode
+                                    ), should_skip AS (
+                                        SELECT
+                                            id,
+                                            CASE
+                                                WHEN dependency_mode = 'all' AND healthy_parents < parent_count THEN 1
+                                                WHEN dependency_mode = 'any' AND parent_count > 0 AND healthy_parents = 0 THEN 1
+                                                ELSE 0
+                                            END AS skip_flag
+                                        FROM parents
+                                    )
+                                    UPDATE jobs
+                                    SET
+                                        status = 'skipped',
+                                        skipped_at = ?,
+                                        skip_reason = ?,
+                                        skipped_by = ?,
+                                        attempts = max_attempts,
+                                        completed_at = ?
+                                    FROM should_skip ss
+                                    WHERE jobs.id = ss.id
+                                    AND ss.skip_flag = 1
+                                    AND jobs.status NOT IN ('done','failed','skipped')
+                                    RETURNING jobs.id
+                                """,
+                                    [
+                                        job_id,
+                                        now,
+                                        f"parent_failed:{job_id}",
+                                        "queuack",
+                                        now,
+                                    ],
+                                ).fetchall()
+                                conn.commit()
 
-                            if not updated:
-                                break
+                                if not updated:
+                                    break
 
                         self.logger.info(
                             f"Marked descendants of {job_id[:8]} as SKIPPED"
@@ -1327,18 +1328,19 @@ class DuckQueue:
                 # Success
                 result_bytes = pickle.dumps(result) if result is not None else None
 
-                self.conn.execute(
-                    """
-                    UPDATE jobs
-                    SET 
-                        status = 'done',
-                        completed_at = ?,
-                        result = ?
-                    WHERE id = ?
-                """,
-                    [now, result_bytes, job_id],
-                )
-                self.conn.commit()
+                with self.connection_context() as conn:
+                    conn.execute(
+                        """
+                        UPDATE jobs
+                        SET
+                            status = 'done',
+                            completed_at = ?,
+                            result = ?
+                        WHERE id = ?
+                    """,
+                        [now, result_bytes, job_id],
+                    )
+                    conn.commit()
 
                 self.logger.info(f"Job {job_id[:8]} completed successfully")
 
@@ -1355,18 +1357,19 @@ class DuckQueue:
             requeue: If True, move back to pending (default)
         """
         if requeue:
-            self.conn.execute(
-                """
-                UPDATE jobs
-                SET 
-                    status = 'pending',
-                    claimed_at = NULL,
-                    claimed_by = NULL
-                WHERE id = ?
-            """,
-                [job_id],
-            )
-            self.conn.commit()
+            with self.connection_context() as conn:
+                conn.execute(
+                    """
+                    UPDATE jobs
+                    SET
+                        status = 'pending',
+                        claimed_at = NULL,
+                        claimed_by = NULL
+                    WHERE id = ?
+                """,
+                    [job_id],
+                )
+                conn.commit()
             self.logger.info(f"Job {job_id[:8]} requeued")
         else:
             self.ack(job_id, error="Negative acknowledged without requeue")
@@ -1410,19 +1413,20 @@ class DuckQueue:
 
     def get_job(self, job_id: str) -> Optional[Job]:
         """Get job by ID."""
-        cursor = self.conn.execute(
-            """
-            SELECT * FROM jobs WHERE id = ?
-        """,
-            [job_id],
-        )
+        with self.connection_context() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM jobs WHERE id = ?
+            """,
+                [job_id],
+            )
 
-        # CRITICAL FIX: Fetch BEFORE commit
-        result = cursor.fetchone()
-        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            # CRITICAL FIX: Fetch BEFORE commit
+            result = cursor.fetchone()
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
 
-        # Commit AFTER fetching
-        self.conn.commit()
+            # Commit AFTER fetching
+            conn.commit()
 
         if result is None:
             return None
@@ -1452,21 +1456,22 @@ class DuckQueue:
 
     def list_dead_letters(self, limit: int = 100) -> List[Job]:
         """List jobs in dead letter queue (failed permanently)."""
-        cursor = self.conn.execute(
-            """
-            SELECT * FROM dead_letter_queue
-            ORDER BY completed_at DESC
-            LIMIT ?
-        """,
-            [limit],
-        )
+        with self.connection_context() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM dead_letter_queue
+                ORDER BY completed_at DESC
+                LIMIT ?
+            """,
+                [limit],
+            )
 
-        # CRITICAL FIX: Fetch BEFORE commit
-        results = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            # CRITICAL FIX: Fetch BEFORE commit
+            results = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
 
-        # Commit AFTER fetching
-        self.conn.commit()
+            # Commit AFTER fetching
+            conn.commit()
 
         jobs = []
         for row in results:
@@ -1491,50 +1496,49 @@ class DuckQueue:
         """
         cutoff = datetime.now() - timedelta(hours=older_than_hours)
 
-        if queue:
-            # Count first, then delete
-            count_result = self.conn.execute(
-                """
-                SELECT COUNT(*) FROM jobs
-                WHERE queue = ? AND status = ? AND created_at < ?
-            """,
-                [queue, status, cutoff],
-            ).fetchone()
-            self.conn.commit()
-
-            count = count_result[0] if count_result else 0
-
-            if count > 0:
-                self.conn.execute(
+        with self.connection_context() as conn:
+            if queue:
+                # Count first, then delete
+                count_result = conn.execute(
                     """
-                    DELETE FROM jobs
+                    SELECT COUNT(*) FROM jobs
                     WHERE queue = ? AND status = ? AND created_at < ?
                 """,
                     [queue, status, cutoff],
-                )
-                self.conn.commit()
-        else:
-            # Count first, then delete
-            count_result = self.conn.execute(
-                """
-                SELECT COUNT(*) FROM jobs
-                WHERE status = ? AND created_at < ?
-            """,
-                [status, cutoff],
-            ).fetchone()
-            self.conn.commit()
+                ).fetchone()
 
-            count = count_result[0] if count_result else 0
+                count = count_result[0] if count_result else 0
 
-            if count > 0:
-                self.conn.execute(
+                if count > 0:
+                    conn.execute(
+                        """
+                        DELETE FROM jobs
+                        WHERE queue = ? AND status = ? AND created_at < ?
+                    """,
+                        [queue, status, cutoff],
+                    )
+            else:
+                # Count first, then delete
+                count_result = conn.execute(
                     """
-                    DELETE FROM jobs
+                    SELECT COUNT(*) FROM jobs
                     WHERE status = ? AND created_at < ?
                 """,
                     [status, cutoff],
-                )
-                self.conn.commit()
+                ).fetchone()
+
+                count = count_result[0] if count_result else 0
+
+                if count > 0:
+                    conn.execute(
+                        """
+                        DELETE FROM jobs
+                        WHERE status = ? AND created_at < ?
+                    """,
+                        [status, cutoff],
+                    )
+
+            conn.commit()
 
         self.logger.info(f"Purged {count} {status} jobs older than {older_than_hours}h")
 
