@@ -102,9 +102,7 @@ def _display_examples_table(
         return {}
     
     mapping = {}
-    indent = "  "
-    row_indent = indent + "  "
-    
+
     for order_num, cat in enumerate(CATEGORY_ORDER, 1):
         examples = examples_by_cat.get(cat, [])
 
@@ -117,8 +115,8 @@ def _display_examples_table(
         # Category header
         if not silent:
             cat_title = cat.upper().replace('_', ' ')
-            click.echo(f"\n  📁 {order_num}. {cat_title}")
-            click.echo(f"  {'='*60}")
+            click.echo(f"\n┌─ 📁 {order_num}. {cat_title}")
+            click.echo(f"│")
 
         # Group by subdomain if present
         by_subdomain = {}
@@ -143,7 +141,8 @@ def _display_examples_table(
                 # Check if last subdomain
                 is_last_subdomain = subdomain == sorted_subdomains[-1]
                 branch_char = "└─" if is_last_subdomain else "├─"
-                click.echo(f"{row_indent}{branch_char} 📂 {order_num}.{subdomain_counter}. {subdomain_title}")
+                click.echo(f"│  {branch_char} 📂 {order_num}.{subdomain_counter}. {subdomain_title}")
+                click.echo(f"│  {'│' if not is_last_subdomain else ' '}")
 
             sub_item_counter = 1
             for ex in subdomain_examples:
@@ -178,17 +177,17 @@ def _display_examples_table(
                         is_last_item = sub_item_counter == len(subdomain_examples)
 
                         if is_last_subdomain:
-                            item_indent = f"{row_indent}    "  # No pipe for last subdomain
+                            item_indent = "│      "  # Last subdomain
                         else:
-                            item_indent = f"{row_indent}│   "  # Pipe continuation
+                            item_indent = "│  │   "  # Pipe continuation
                     else:
-                        item_indent = row_indent
+                        item_indent = "│  "
 
                     # Print row with consistent spacing
                     click.echo(
-                        f"{item_indent}{numbered_key:<8} "
+                        f"{item_indent}{numbered_key:<10} "
                         f"{worker_padded} "
-                        f"{diff_colored:<23}  "  # Allow space for ANSI codes
+                        f"{diff_colored:<23}  "
                         f"{ex.description}"
                     )
 
@@ -202,9 +201,10 @@ def _display_examples_table(
     
     # Footer
     if not silent:
-        click.echo(f"\n{indent}{SEPARATOR_DOUBLE}")
-        click.echo(f"{indent}Legend: 👷 = Requires worker process")
-    
+        click.echo(f"\n{'─'*70}")
+        click.echo(f"💡 Legend: 👷 = Requires worker process")
+        click.echo(f"{'─'*70}")
+
     return mapping
 
 # ============================================================================
