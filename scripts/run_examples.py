@@ -103,6 +103,9 @@ def _display_examples_table(
     
     mapping = {}
 
+    is_last_category = lambda cat_idx: cat_idx == len([c for c in CATEGORY_ORDER if examples_by_cat.get(c)])
+
+    category_idx = 0
     for order_num, cat in enumerate(CATEGORY_ORDER, 1):
         examples = examples_by_cat.get(cat, [])
 
@@ -112,11 +115,17 @@ def _display_examples_table(
         if not examples:
             continue
 
+        category_idx += 1
+
         # Category header
         if not silent:
             cat_title = cat.upper().replace('_', ' ')
+            is_last = is_last_category(category_idx)
             click.echo(f"\n┌─ 📁 {order_num}. {cat_title}")
-            click.echo(f"│")
+            if is_last:
+                click.echo("")  # No vertical line for last category
+            else:
+                click.echo("│")
 
         # Group by subdomain if present
         by_subdomain = {}
@@ -132,17 +141,24 @@ def _display_examples_table(
         # Sort subdomains: empty string first (for non-nested), then by number
         sorted_subdomains = sorted(by_subdomain.keys(), key=lambda x: ("0" if x == "" else x))
 
+        is_last = is_last_category(category_idx)
+
         for subdomain in sorted_subdomains:
             subdomain_examples = sorted(by_subdomain[subdomain], key=lambda x: x.path.name)
 
             # Print subdomain header if it exists
             if subdomain and not silent:
                 subdomain_title = subdomain.upper().replace('_', ' ')
-                # Check if last subdomain
                 is_last_subdomain = subdomain == sorted_subdomains[-1]
                 branch_char = "└─" if is_last_subdomain else "├─"
-                click.echo(f"│  {branch_char} 📂 {order_num}.{subdomain_counter}. {subdomain_title}")
-                click.echo(f"│  {'│' if not is_last_subdomain else ' '}")
+
+                cat_prefix = "" if is_last else "│  "
+                click.echo(f"{cat_prefix}{branch_char} 📂 {order_num}.{subdomain_counter}. {subdomain_title}")
+
+                if not is_last_subdomain:
+                    click.echo(f"{cat_prefix}│")
+                else:
+                    click.echo(f"{cat_prefix}")
 
             sub_item_counter = 1
             for ex in subdomain_examples:
@@ -172,20 +188,30 @@ def _display_examples_table(
 
                     # Adjust indentation for subdomain items
                     if subdomain:
-                        # Check if last subdomain and last item
                         is_last_subdomain = subdomain == sorted_subdomains[-1]
                         is_last_item = sub_item_counter == len(subdomain_examples)
+                        item_branch = "└─" if is_last_item else "├─"
 
-                        if is_last_subdomain:
-                            item_indent = "│      "  # Last subdomain
+                        if is_last:
+                            # Last category
+                            if is_last_subdomain:
+                                item_indent = f"   {item_branch} "
+                            else:
+                                item_indent = f"│  │  {item_branch} "
                         else:
-                            item_indent = "│  │   "  # Pipe continuation
+                            # Not last category
+                            if is_last_subdomain:
+                                item_indent = f"│     {item_branch} "
+                            else:
+                                item_indent = f"│  │  {item_branch} "
                     else:
-                        item_indent = "│  "
+                        is_last_item = example_counter == len(subdomain_examples)
+                        item_branch = "└─" if is_last_item else "├─"
+                        item_indent = f"{'│' if not is_last else ' '}  {item_branch} "
 
                     # Print row with consistent spacing
                     click.echo(
-                        f"{item_indent}{numbered_key:<10} "
+                        f"{item_indent}{numbered_key:<8} "
                         f"{worker_padded} "
                         f"{diff_colored:<23}  "
                         f"{ex.description}"
