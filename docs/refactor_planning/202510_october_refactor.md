@@ -1,8 +1,30 @@
 # 🦆 Queuack Enhancements: Claude CLI Implementation Guide
 
-**Status**: Phase 1 Complete ✅ | Phases 2-4 Ready for Implementation
+**Status**: Phase 1 Complete ✅ | Thread Safety Complete ✅ | Phases 2-4 Ready for Implementation
 
 This guide provides systematic Claude CLI prompts for implementing remaining Queuack enhancements with production-ready stability.
+
+---
+
+## Recent Completion: Thread Safety Standardization (January 2025) ✅
+
+### Critical Fix: connection_context() Standard
+
+**Problem Resolved**: Segmentation faults in concurrent scenarios due to improper DuckDB connection handling.
+
+**What Was Fixed**:
+- Comprehensive standardization of `connection_context()` across ALL database operations
+- Fixed 7 critical methods: `enqueue()`, `_claim_internal()`, `_ack_internal()`, `nack()`, `get_job()`, `list_dead_letters()`, `purge()`
+- Eliminated race conditions caused by direct `self.conn` usage bypassing thread locks
+- All 546 tests passing, including `test_concurrent_enqueue_operations`
+
+**Key Commits**:
+- `18d39ab`: "fix: Standardize connection_context across all DB operations"
+- `67fbffd`: "docs: Add connection_context standard documentation"
+
+**Documentation**: See `docs/memorandum/202501_connection_context_standard.md` for complete details.
+
+**Impact**: Zero segfaults in concurrent scenarios, thread-safe operations, reliable concurrent access to `:memory:` databases.
 
 ---
 
@@ -16,6 +38,7 @@ This guide provides systematic Claude CLI prompts for implementing remaining Que
 - ✅ Context helpers: `upstream_all()`, `upstream_or()`, `has_upstream_any()`
 - ✅ TaskContext system with automatic parent result passing
 - ✅ Connection safety and concurrency fixes
+- ✅ **Thread-safety standardization via connection_context() (January 2025)**
 
 ### Current Project State
 
