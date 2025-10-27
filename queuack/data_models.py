@@ -794,7 +794,6 @@ class Job:
 
     def _execute_function(self, func, args, kwargs, logger):
         """Execute the function with proper handling for SubDAGExecutor."""
-        # CRITICAL FIX: SubDAGExecutor needs parent_job_id
         # Check if this is a SubDAGExecutor and inject parent_job_id
         from queuack.dag import SubDAGExecutor
 
@@ -803,9 +802,6 @@ class Job:
             logger.info(
                 f"SubDAGExecutor - args: {args}, kwargs: {list(kwargs.keys()) if kwargs else 'None'}"
             )
-
-            # The issue is that SubDAGExecutor.__call__(parent_job_id=None) expects parent_job_id
-            # but we need to pass self.id. We must be careful about positional vs keyword args.
 
             if args and len(args) > 0:
                 # If there are positional args, first one might conflict with parent_job_id
