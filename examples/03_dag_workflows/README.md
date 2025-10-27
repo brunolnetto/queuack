@@ -18,8 +18,8 @@ from queuack import DAG, DuckQueue
 
 dag = DAG("pipeline", queue=DuckQueue(":memory:"))
 dag.add_node(extract, name="extract")
-dag.add_node(transform, name="transform", upstream=["extract"])
-dag.add_node(load, name="load", upstream=["transform"])
+dag.add_node(transform, name="transform", depends_on=["extract"])
+dag.add_node(load, name="load", depends_on=["transform"])
 dag.execute()
 ```
 

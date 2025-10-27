@@ -68,9 +68,9 @@ def create_sample_dag(queue):
     # Build the DAG
     dag.add_node(extract_api, name="extract_api")
     dag.add_node(extract_db, name="extract_db")
-    dag.add_node(transform, name="transform", upstream=["extract_api", "extract_db"])
-    dag.add_node(validate, name="validate", upstream=["transform"])
-    dag.add_node(load, name="load", upstream=["validate"])
+    dag.add_node(transform, name="transform", depends_on=["extract_api", "extract_db"])
+    dag.add_node(validate, name="validate", depends_on=["transform"])
+    dag.add_node(load, name="load", depends_on=["validate"])
 
     return dag
 

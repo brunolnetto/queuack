@@ -331,11 +331,11 @@ def run_ml_pipeline():
 
     # Build pipeline DAG
     dag.add_node(ingest_data, name="ingest")
-    dag.add_node(validate_data, name="validate", upstream=["ingest"])
-    dag.add_node(engineer_features, name="engineer_features", upstream=["ingest", "validate"])
-    dag.add_node(train_model, name="train", upstream=["engineer_features"])
-    dag.add_node(evaluate_model, name="evaluate", upstream=["train"])
-    dag.add_node(deploy_model, name="deploy", upstream=["evaluate"])
+    dag.add_node(validate_data, name="validate", depends_on=["ingest"])
+    dag.add_node(engineer_features, name="engineer_features", depends_on=["ingest", "validate"])
+    dag.add_node(train_model, name="train", depends_on=["engineer_features"])
+    dag.add_node(evaluate_model, name="evaluate", depends_on=["train"])
+    dag.add_node(deploy_model, name="deploy", depends_on=["evaluate"])
 
     # Execute pipeline
     print("\n🔄 Executing ML pipeline...")

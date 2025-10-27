@@ -295,7 +295,7 @@ def run_dag_workflow():
     dag.add_node(
         dag_combine_results,
         name="combine",
-        upstream=["fetch_users", "fetch_orders", "fetch_pages"]
+        depends_on=["fetch_users", "fetch_orders", "fetch_pages"]
     )
 
     # Execute

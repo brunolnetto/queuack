@@ -67,11 +67,11 @@ dag = DAG("ml_pipeline")
 
 # Build pipeline
 dag.add_node(ingest_data, name="ingest")
-dag.add_node(validate_data, name="validate", upstream=["ingest"])
-dag.add_node(engineer_features, name="features", upstream=["validate"])
-dag.add_node(train_model, name="train", upstream=["features"])
-dag.add_node(evaluate_model, name="evaluate", upstream=["train"])
-dag.add_node(deploy_model, name="deploy", upstream=["evaluate"])
+dag.add_node(validate_data, name="validate", depends_on=["ingest"])
+dag.add_node(engineer_features, name="features", depends_on=["validate"])
+dag.add_node(train_model, name="train", depends_on=["features"])
+dag.add_node(evaluate_model, name="evaluate", depends_on=["train"])
+dag.add_node(deploy_model, name="deploy", depends_on=["evaluate"])
 
 # Execute
 dag.execute()  # All steps tracked in DuckDB
@@ -185,7 +185,7 @@ from queuack import DAG
 
 dag = DAG("pipeline")
 dag.add_node(extract, name="extract")
-dag.add_node(transform, name="transform", upstream=["extract"])
+dag.add_node(transform, name="transform", depends_on=["extract"])
 dag.execute()
 
 # Just Python functions
