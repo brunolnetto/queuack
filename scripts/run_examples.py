@@ -117,8 +117,8 @@ def _display_examples_table(
         # Category header
         if not silent:
             cat_title = cat.upper().replace('_', ' ')
-            click.echo(f"\n{indent}📁 {order_num}. {cat_title}")
-            click.echo(f"{indent}{SEPARATOR_DOUBLE}")
+            click.echo(f"\n  📁 {order_num}. {cat_title}")
+            click.echo(f"  {'='*60}")
 
         # Group by subdomain if present
         by_subdomain = {}
@@ -140,7 +140,10 @@ def _display_examples_table(
             # Print subdomain header if it exists
             if subdomain and not silent:
                 subdomain_title = subdomain.upper().replace('_', ' ')
-                click.echo(f"{row_indent}├─ {order_num}.{subdomain_counter}. {subdomain_title}")
+                # Check if last subdomain
+                is_last_subdomain = subdomain == sorted_subdomains[-1]
+                branch_char = "└─" if is_last_subdomain else "├─"
+                click.echo(f"{row_indent}{branch_char} 📂 {order_num}.{subdomain_counter}. {subdomain_title}")
 
             sub_item_counter = 1
             for ex in subdomain_examples:
@@ -169,7 +172,17 @@ def _display_examples_table(
                     worker_padded = _pad_display(worker, 2)
 
                     # Adjust indentation for subdomain items
-                    item_indent = f"{row_indent}│  " if subdomain else row_indent
+                    if subdomain:
+                        # Check if last subdomain and last item
+                        is_last_subdomain = subdomain == sorted_subdomains[-1]
+                        is_last_item = sub_item_counter == len(subdomain_examples)
+
+                        if is_last_subdomain:
+                            item_indent = f"{row_indent}    "  # No pipe for last subdomain
+                        else:
+                            item_indent = f"{row_indent}│   "  # Pipe continuation
+                    else:
+                        item_indent = row_indent
 
                     # Print row with consistent spacing
                     click.echo(
