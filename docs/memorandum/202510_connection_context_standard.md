@@ -8,7 +8,7 @@ This document establishes `connection_context()` as the **mandatory standard** f
 
 ### The Problem
 
-In January 2025, we encountered a critical segmentation fault in `test_concurrent_enqueue_operations` when multiple threads attempted to enqueue jobs concurrently on a `:memory:` database.
+In October 2025, we encountered a critical segmentation fault in `test_concurrent_enqueue_operations` when multiple threads attempted to enqueue jobs concurrently on a `:memory:` database.
 
 **Root Cause:**
 - DuckDB connections are **NOT thread-safe**

@@ -14,8 +14,8 @@ This guide provides systematic Claude CLI prompts for implementing remaining Que
 |-------|--------|----------------|------------------|
 | **Phase 1: Usability** | ✅ **Complete** | October 2024 | `dag.execute()`, fluent API, decorators, TaskContext |
 | **Thread Safety** | ✅ **Complete** | January 2025 | `connection_context()` standard, segfault fixes |
-| **Phase 2: Async** | ⏳ Not Started | TBD | Optional - evaluate demand first |
-| **Phase 3: Generators** | ⏳ Not Started | TBD | **Recommended next** - streaming support |
+| **Phase 2: Async** | 🔶 Partial (decorators only) | TBD | Optional - evaluate demand first |
+| **Phase 3: Generators** | ✅ Complete | TBD | Support to formats jsonl, csv and parquet |
 | **Phase 4: Backends** | ⏳ Not Started | TBD | Pluggable storage (PostgreSQL, Redis, SQLite) |
 
 **Current Test Status**: 546 tests passing, 2 skipped, 0 failures ✅
@@ -74,14 +74,9 @@ tests/
 ### What's Next (Remaining Phases)
 
 **Phase 2**: Async Support (Optional, based on demand)
-- Status: ⏳ **Not Started** - Evaluate demand before implementing
+- Status: 🔶 Partial (decorators only)
 - Complexity: High | Value: High (for I/O-heavy workloads only)
 - Recommendation: Consider after Phases 3 & 4 if needed
-
-**Phase 3**: Generator Streaming (High value for big data)
-- Status: ⏳ **Not Started** - Recommended next priority
-- Complexity: Medium | Value: High (enables 100M+ row datasets)
-- Recommendation: **Implement first** - highest value/risk ratio
 
 **Phase 4**: Storage Backends (Production deployments)
 - Status: ⏳ **Not Started** - Production-critical
@@ -94,9 +89,8 @@ tests/
 
 ### Priority Order (Recommended)
 
-1. **Phase 3 First** - Generators (simpler, immediate value)
-2. **Phase 4 Second** - Backends (production-critical)
-3. **Phase 2 Last** - Async (complex, evaluate demand)
+1. **Phase 4 Second** - Backends (production-critical)
+2. **Phase 2 Last** - Async (complex, evaluate demand)
 
 **Rationale**: Based on October 2024 production learnings, focus on stability over complexity. Async gains can be achieved through better concurrency tuning for most workloads.
 
@@ -1655,111 +1649,6 @@ Expected performance characteristics, benchmarks, or comparisons.
 
 ---
 
-## Release Checklist
-
-### Pre-Release
-
-```bash
-# 1. Update version everywhere
-grep -r "0.1.0" queuack/ setup.py README.md
-# Update to "2.0.0"
-
-# 2. Update changelog
-# Add release date to CHANGELOG.md
-
-# 3. Run full test suite
-pytest tests/ -v --cov=queuack --cov-report=html
-open htmlcov/index.html
-
-# 4. Test package installation
-python setup.py sdist bdist_wheel
-pip install dist/queuack-2.0.0-py3-none-any.whl
-python -c "import queuack; print(queuack.__version__)"
-
-# 5. Test examples in clean environment
-python -m venv test_env
-source test_env/bin/activate
-pip install dist/queuack-2.0.0-py3-none-any.whl
-python examples/generator_streaming.py
-python examples/backend_comparison.py
-deactivate
-rm -rf test_env
-
-# 6. Build documentation
-cd docs && make html && cd ..
-open docs/_build/html/index.html
-
-# 7. Check package metadata
-python setup.py check --metadata --strict
-
-# 8. Scan for security issues
-bandit -r queuack/ -ll
-```
-
-### Release
-
-```bash
-# 1. Create release branch
-git checkout -b release/v2.0.0
-git push origin release/v2.0.0
-
-# 2. Tag release
-git tag -a v2.0.0 -m "Queuack 2.0.0: Generators, Backends, and More"
-git push origin v2.0.0
-
-# 3. Build distributions
-python setup.py sdist bdist_wheel
-
-# 4. Upload to PyPI (test first)
-twine upload --repository testpypi dist/*
-# Test: pip install -i https://test.pypi.org/simple/ queuack==2.0.0
-
-# 5. Upload to PyPI (production)
-twine upload dist/*
-
-# 6. Create GitHub release
-gh release create v2.0.0 \
-    --title "Queuack 2.0.0" \
-    --notes "See CHANGELOG.md for details" \
-    dist/*
-
-# 7. Update documentation site
-# (depends on your docs hosting)
-
-# 8. Announce
-# - Twitter/X
-# - Reddit (r/Python)
-# - Dev.to
-# - Company blog
-```
-
-### Post-Release
-
-```bash
-# 1. Merge release branch to main
-git checkout main
-git merge release/v2.0.0
-git push origin main
-
-# 2. Start next development cycle
-git checkout -b develop
-# Edit version to "2.1.0-dev"
-git commit -am "chore: Start v2.1.0 development"
-git push origin develop
-
-# 3. Monitor for issues
-# - Watch GitHub issues
-# - Monitor PyPI download stats
-# - Check for bug reports
-
-# 4. Plan next release
-# - Gather feedback
-# - Prioritize features
-# - Update roadmap
-```
-
----
-
 ## Success Metrics
 
 ### Track These Metrics
@@ -1845,7 +1734,7 @@ queuack/
 
 tests/
 ├── test_usability_improvements.py  # Phase 1 ✅
-├── test_generators.py              # Phase 3
+├── test_generators.py              # Phase 3 ✅
 ├── test_storage_backends.py        # Phase 4
 ├── test_async_dag.py               # Phase 2 (optional)
 └── test_integration_complete.py    # All features
@@ -1863,7 +1752,6 @@ docs/
 
 CHANGELOG.md                    # Version history
 README.md                       # Updated with Phase 1-4
-setup.py                        # Updated dependencies
 ```
 
 ---
@@ -1915,7 +1803,7 @@ setup.py                        # Updated dependencies
 **Recommended order:**
 1. ✅ **Phase 1: Usability** (COMPLETED - October 2024)
 2. ✅ **Thread Safety Fix** (COMPLETED - January 2025)
-3. ⏳ **Phase 3: Generators** (NEXT - highest value/risk ratio)
+3. ✅ **Phase 3: Generators** (COMPLETED - October 2024)
 4. ⏳ **Phase 4: Backends** (THEN - production-critical)
 5. ⏳ **Phase 2: Async** (LAST - evaluate need first)
 
@@ -1923,15 +1811,15 @@ setup.py                        # Updated dependencies
 
 **Completed:**
 - ✅ Phase 1: All usability improvements in production
+- ✅ Phase 3: Generators for O(1) dataset memory
 - ✅ Thread Safety: `connection_context()` standardized, 546 tests passing
 - ✅ Zero segfaults in concurrent scenarios
 - ✅ Production-ready for current feature set
 
 **Remaining Work:**
-- Phase 3: 3-4 hours (straightforward implementation)
 - Phase 4: 8-12 hours (careful refactoring required)
 - Phase 2: 4-6 hours (complex, only if needed)
-- **Total Remaining**: 15-22 hours for all phases
+- **Total Remaining**: 12-18 hours for all phases
 
 ### Success Criteria (Current Achievement)
 
@@ -1943,11 +1831,6 @@ setup.py                        # Updated dependencies
 - ✅ **Production ready** (thread-safe, stable, tested)
 
 ### Next Steps
-
-**When ready for Phase 3 (Generators):**
-- Start with generator streaming for O(1) memory workflows
-- Estimated completion: 3-4 hours
-- High value for big data scenarios
 
 **When ready for Phase 4 (Backends):**
 - Enables production scaling with PostgreSQL, Redis, SQLite

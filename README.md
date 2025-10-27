@@ -86,8 +86,8 @@ def load(context):
 
 # Build pipeline
 dag.add_node(extract, name="extract")
-dag.add_node(transform, name="transform", upstream=["extract"])
-dag.add_node(load, name="load", upstream=["transform"])
+dag.add_node(transform, name="transform", depends_on=["extract"])
+dag.add_node(load, name="load", depends_on=["transform"])
 
 # Execute
 dag.execute()
@@ -143,11 +143,11 @@ dag = DAG("model_training", queue=queue)
 
 # Build ML pipeline
 dag.add_node(ingest_data, name="ingest")
-dag.add_node(validate_data, name="validate", upstream=["ingest"])
-dag.add_node(engineer_features, name="features", upstream=["validate"])
-dag.add_node(train_model, name="train", upstream=["features"])
-dag.add_node(evaluate_model, name="evaluate", upstream=["train"])
-dag.add_node(deploy_model, name="deploy", upstream=["evaluate"])
+dag.add_node(validate_data, name="validate", depends_on=["ingest"])
+dag.add_node(engineer_features, name="features", depends_on=["validate"])
+dag.add_node(train_model, name="train", depends_on=["features"])
+dag.add_node(evaluate_model, name="evaluate", depends_on=["train"])
+dag.add_node(deploy_model, name="deploy", depends_on=["evaluate"])
 
 # Execute pipeline - all state tracked in SQLite
 dag.execute()
@@ -191,15 +191,15 @@ stats = queue.stats()
 ```python
 # Fan-out/fan-in pattern
 dag.add_node(extract, name="extract")
-dag.add_node(transform_a, name="transform_a", upstream=["extract"])
-dag.add_node(transform_b, name="transform_b", upstream=["extract"])
-dag.add_node(load, name="load", upstream=["transform_a", "transform_b"])
+dag.add_node(transform_a, name="transform_a", depends_on=["extract"])
+dag.add_node(transform_b, name="transform_b", depends_on=["extract"])
+dag.add_node(load, name="load", depends_on=["transform_a", "transform_b"])
 
 # Conditional execution (ANY mode)
 dag.add_node(
     validate,
     name="validate",
-    upstream=["source_a", "source_b"],
+    depends_on=["source_a", "source_b"],
     dependency_mode="any"  # Run when ANY parent completes
 )
 
