@@ -583,7 +583,7 @@ class Job:
     completed_at: Optional[datetime] = None
     attempts: int = 0
     max_attempts: int = 3
-    timeout_seconds: int = 300
+    timeout_seconds: float = 300
     result: Optional[bytes] = None
     error: Optional[str] = None
     skipped_at: Optional[datetime] = None
@@ -728,32 +728,37 @@ class Job:
             logger.info(f"Executing {func_name}")
 
         try:
-            # CRITICAL FIX: SubDAGExecutor needs parent_job_id
-            # Check if this is a SubDAGExecutor and inject parent_job_id
-            from queuack.dag import SubDAGExecutor
+            # Enforce timeout if specified
+            if self.timeout_seconds and self.timeout_seconds > 0:
+                import threading
+                import sys
 
-            if isinstance(func, SubDAGExecutor):
-                # Debug what we're dealing with
-                logger.info(
-                    f"SubDAGExecutor - args: {args}, kwargs: {list(kwargs.keys()) if kwargs else 'None'}"
-                )
+                result_container = [None]
+                exception_container = [None]
 
-                # The issue is that SubDAGExecutor.__call__(parent_job_id=None) expects parent_job_id
-                # but we need to pass self.id. We must be careful about positional vs keyword args.
+                def run_with_timeout():
+                    try:
+                        result_container[0] = self._execute_function(func, args, kwargs, logger)
+                    except Exception as e:
+                        exception_container[0] = e
 
-                if args and len(args) > 0:
-                    # If there are positional args, first one might conflict with parent_job_id
-                    logger.warning(
-                        f"SubDAGExecutor called with positional args: {args}"
-                    )
-                    # Call as-is and let it fail for now to understand the issue
-                    result = func(*args, **kwargs)
-                else:
-                    # No positional args - safe to pass parent_job_id as keyword arg
-                    kwargs_with_parent = dict(kwargs or {}, parent_job_id=self.id)
-                    result = func(**kwargs_with_parent)
+                # Run in a thread with timeout
+                thread = threading.Thread(target=run_with_timeout, daemon=True)
+                thread.start()
+                thread.join(timeout=self.timeout_seconds)
+
+                if thread.is_alive():
+                    # Timeout occurred
+                    raise TimeoutError(f"Job exceeded timeout of {self.timeout_seconds} seconds")
+
+                # Check if function raised an exception
+                if exception_container[0]:
+                    raise exception_container[0]
+
+                result = result_container[0]
             else:
-                result = func(*args, **kwargs)
+                result = self._execute_function(func, args, kwargs, logger)
+
             return result
 
         finally:
@@ -769,6 +774,36 @@ class Job:
                 except ImportError:
                     pass
 
+    def _execute_function(self, func, args, kwargs, logger):
+        """Execute the function with proper handling for SubDAGExecutor."""
+        # CRITICAL FIX: SubDAGExecutor needs parent_job_id
+        # Check if this is a SubDAGExecutor and inject parent_job_id
+        from queuack.dag import SubDAGExecutor
+
+        if isinstance(func, SubDAGExecutor):
+            # Debug what we're dealing with
+            logger.info(
+                f"SubDAGExecutor - args: {args}, kwargs: {list(kwargs.keys()) if kwargs else 'None'}"
+            )
+
+            # The issue is that SubDAGExecutor.__call__(parent_job_id=None) expects parent_job_id
+            # but we need to pass self.id. We must be careful about positional vs keyword args.
+
+            if args and len(args) > 0:
+                # If there are positional args, first one might conflict with parent_job_id
+                logger.warning(
+                    f"SubDAGExecutor called with positional args: {args}"
+                )
+                # Call as-is and let it fail for now to understand the issue
+                result = func(*args, **kwargs)
+            else:
+                # No positional args - safe to pass parent_job_id as keyword arg
+                kwargs_with_parent = dict(kwargs or {}, parent_job_id=self.id)
+                result = func(**kwargs_with_parent)
+        else:
+            result = func(*args, **kwargs)
+        return result
+
 
 @dataclass
 class JobSpec:
@@ -781,7 +816,7 @@ class JobSpec:
     depends_on: Optional[Union[str, List[str]]] = None
     priority: int = 50
     max_attempts: int = 3
-    timeout_seconds: int = 300
+    timeout_seconds: float = 300
     dependency_mode: DependencyMode = DependencyMode.ALL
 
     def __post_init__(self):
