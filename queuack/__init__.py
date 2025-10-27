@@ -34,9 +34,15 @@ from .status import (
     node_status_to_job_status,
 )
 from .decorators import (
-    streaming_task, 
-    timed_task, 
+    streaming_task,
+    timed_task,
     retry_task,
+    generator_task,
+    async_generator_task,
+)
+from .streaming import (
+    StreamWriter,
+    StreamReader,
 )
 
 
@@ -62,6 +68,11 @@ __all__ = [
     "streaming_task",
     "timed_task",
     "retry_task",
+    "generator_task",
+    "async_generator_task",
+    # streaming exports
+    "StreamWriter",
+    "StreamReader",
     # status exports
     "DAGRunStatus",
     "NodeStatus",

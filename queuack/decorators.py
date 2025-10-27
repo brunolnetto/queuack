@@ -5,12 +5,16 @@ This module provides convenience decorators that reduce boilerplate and
 enforce best practices for specific task types.
 """
 
+import asyncio
+import inspect
+import tempfile
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
 import time
 
 from .data_models import TaskContext
+from .streaming import StreamWriter
 
 
 def streaming_task(func: Callable) -> Callable:
@@ -228,6 +232,214 @@ def retry_task(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
             
             # Should never reach here
             raise RuntimeError(f"{func_name} exceeded max attempts")
-        
+
+        return wrapper
+    return decorator
+
+
+def generator_task(format: str = "jsonl"):
+    """Decorator for generator functions that stream large datasets.
+
+    Automatically materializes generator output to a temporary file using
+    StreamWriter, enabling O(1) memory usage for large datasets. The function
+    returns the file path instead of the generator.
+
+    This is ideal for ETL pipelines where intermediate results are too large
+    to hold in memory.
+
+    Args:
+        format: Output format - 'jsonl' or 'pickle' (default: 'jsonl')
+
+    Returns:
+        Decorator function
+
+    Example - Basic generator task:
+        @generator_task(format="jsonl")
+        def extract_data():
+            '''Extract 1 million records without loading all into memory.'''
+            for i in range(1000000):
+                yield {"id": i, "value": i * 2}
+
+        # Returns: path to temporary JSONL file containing all records
+        # Memory usage: O(1) - only one record in memory at a time
+
+    Example - With database streaming:
+        @generator_task(format="jsonl")
+        def extract_from_db(context: TaskContext):
+            '''Stream millions of rows from database.'''
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM large_table")
+
+            for row in cursor:
+                yield {
+                    "id": row[0],
+                    "name": row[1],
+                    "value": row[2]
+                }
+
+            cursor.close()
+            conn.close()
+
+    Example - Chaining with StreamReader:
+        from queuack import StreamReader
+
+        @generator_task(format="jsonl")
+        def transform(context: TaskContext):
+            '''Transform data from upstream generator task.'''
+            input_path = context.upstream("extract")
+
+            # Read lazily - no memory spike
+            reader = StreamReader(input_path)
+            for item in reader:
+                # Transform each item
+                yield {
+                    "id": item["id"],
+                    "value": item["value"] * 10
+                }
+
+    Note:
+        - Generator functions are auto-detected using inspect.isgeneratorfunction
+        - Output written to temporary file (tempfile.NamedTemporaryFile)
+        - Temporary files cleaned up by OS after process exits
+        - Use with_timing=False in DAG to avoid duplicate timing logs
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Call the original function
+            result = func(*args, **kwargs)
+
+            # Check if result is a generator
+            if inspect.isgenerator(result):
+                # Create temporary file for output
+                # delete=False so file persists after closing
+                temp_file = tempfile.NamedTemporaryFile(
+                    mode='wb',
+                    suffix=f'.{format}',
+                    delete=False
+                )
+                temp_path = temp_file.name
+                temp_file.close()
+
+                # Write generator to file
+                writer = StreamWriter(temp_path, format=format)
+                count = writer.write(result)
+
+                print(f"[STREAM] {func.__name__} wrote {count:,} items to {Path(temp_path).name}")
+
+                return temp_path
+            else:
+                # Not a generator - return as-is
+                # This allows flexibility if function sometimes returns path directly
+                return result
+
+        return wrapper
+    return decorator
+
+
+def async_generator_task(format: str = "jsonl"):
+    """Decorator for async generator functions that stream large datasets.
+
+    Like @generator_task but for async generators. Automatically materializes
+    async generator output to a temporary file, enabling O(1) memory usage.
+
+    Args:
+        format: Output format - 'jsonl' or 'pickle' (default: 'jsonl')
+
+    Returns:
+        Decorator function
+
+    Example - Async API streaming:
+        @async_generator_task(format="jsonl")
+        async def fetch_api_data():
+            '''Stream data from paginated API without loading all into memory.'''
+            page = 1
+            while True:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"/api/data?page={page}") as resp:
+                        data = await resp.json()
+
+                        if not data['items']:
+                            break
+
+                        for item in data['items']:
+                            yield item
+
+                        page += 1
+
+    Example - Async database streaming:
+        @async_generator_task(format="jsonl")
+        async def extract_from_async_db():
+            '''Stream records from async database.'''
+            async with get_async_db_pool() as pool:
+                async with pool.acquire() as conn:
+                    async for row in conn.cursor("SELECT * FROM large_table"):
+                        yield {
+                            "id": row['id'],
+                            "data": row['data']
+                        }
+
+    Example - Processing async streams:
+        @async_generator_task(format="pickle")
+        async def process_stream(context: TaskContext):
+            '''Transform data from upstream async generator.'''
+            input_path = context.upstream("extract")
+
+            # Read with StreamReader
+            from queuack import StreamReader
+            reader = StreamReader(input_path)
+
+            for item in reader:
+                # Async processing
+                processed = await async_transform(item)
+                yield processed
+
+    Note:
+        - Async generator functions auto-detected using inspect.isasyncgenfunction
+        - Returns path to temporary file containing materialized data
+        - Use with DAG async execution for full async pipeline
+        - Temporary files cleaned up by OS after process exits
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Call the original async function
+            result = func(*args, **kwargs)
+
+            # Check if result is an async generator
+            if inspect.isasyncgen(result):
+                # Create temporary file for output
+                temp_file = tempfile.NamedTemporaryFile(
+                    mode='wb',
+                    suffix=f'.{format}',
+                    delete=False
+                )
+                temp_path = temp_file.name
+                temp_file.close()
+
+                # Write async generator to file
+                writer = StreamWriter(temp_path, format=format)
+                count = 0
+
+                # Manually iterate async generator and collect items
+                items = []
+                async for item in result:
+                    items.append(item)
+
+                # Write collected items
+                def item_generator():
+                    for item in items:
+                        yield item
+
+                count = writer.write(item_generator())
+
+                print(f"[STREAM] {func.__name__} wrote {count:,} items to {Path(temp_path).name}")
+
+                return temp_path
+            else:
+                # Not an async generator - await and return
+                return await result
+
         return wrapper
     return decorator
