@@ -52,6 +52,8 @@ Real-world examples you can adapt for your projects.
 - `image_processing.py` - Parallel image processing
 - `report_generator.py` - Report generation with parallel data fetching
 - `ml_training_pipeline.py` - ML training with model comparison
+- `07_streaming_etl.py` - **NEW!** Memory-efficient streaming ETL (1M+ records)
+- `08_streaming_formats.py` - **NEW!** Multi-format exports (JSONL/CSV/Parquet/Pickle)
 
 ### 05_advanced/ - Advanced Patterns
 Advanced techniques for production deployments.
@@ -61,6 +63,7 @@ Advanced techniques for production deployments.
 - `distributed_workers.py` - Multi-machine worker deployment
 - `retry_strategies.py` - Advanced retry patterns
 - `dag_visualization.py` - Generate DAG diagrams
+- `06_custom_colors.py` - **NEW!** Custom Mermaid color schemes (6 themes)
 
 ### 06_integrations/ - Framework Integration
 Integrate Queuack with popular web frameworks.
