@@ -728,8 +728,16 @@ class Job:
             logger.info(f"Executing {func_name}")
 
         try:
-            # Enforce timeout if specified
-            if self.timeout_seconds and self.timeout_seconds > 0:
+            # Enforce timeout if specified and "short" (< 60 seconds)
+            # For longer timeouts, we skip thread-based enforcement to avoid
+            # thread-safety issues with :memory: databases
+            use_thread_timeout = (
+                self.timeout_seconds
+                and self.timeout_seconds > 0
+                and self.timeout_seconds < 60
+            )
+
+            if use_thread_timeout:
                 import threading
                 import sys
 
@@ -738,9 +746,19 @@ class Job:
 
                 def run_with_timeout():
                     try:
+                        # Propagate context to timeout thread
+                        if context:
+                            set_context(context)
                         result_container[0] = self._execute_function(func, args, kwargs, logger)
                     except Exception as e:
                         exception_container[0] = e
+                    finally:
+                        # Clean up context in timeout thread
+                        if context:
+                            try:
+                                set_context(None)
+                            except Exception:
+                                pass
 
                 # Run in a thread with timeout
                 thread = threading.Thread(target=run_with_timeout, daemon=True)
