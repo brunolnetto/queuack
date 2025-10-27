@@ -107,51 +107,85 @@ def _display_examples_table(
     
     for order_num, cat in enumerate(CATEGORY_ORDER, 1):
         examples = examples_by_cat.get(cat, [])
-        
+
         # Apply filters
         if category_filter and cat != category_filter:
             continue
         if not examples:
             continue
-        
+
         # Category header
         if not silent:
             cat_title = cat.upper().replace('_', ' ')
             click.echo(f"\n{indent}📁 {order_num}. {cat_title}")
             click.echo(f"{indent}{SEPARATOR_DOUBLE}")
-        
+
+        # Group by subdomain if present
+        by_subdomain = {}
+        for ex in examples:
+            subdomain = ex.subdomain or ""
+            if subdomain not in by_subdomain:
+                by_subdomain[subdomain] = []
+            by_subdomain[subdomain].append(ex)
+
         example_counter = 1
-        for ex in sorted(examples, key=lambda x: x.path.name):
-            # Apply difficulty filter
-            if difficulty_filter and ex.difficulty != difficulty_filter:
-                continue
-            
-            key = f"{cat}/{ex.name}"
-            numbered_key = f"{order_num}.{example_counter}"
-            
-            # Build mapping
-            mapping[numbered_key] = key
-            mapping[key] = key
-            
-            if not silent:
-                # Format row
-                diff_label = f"[{ex.difficulty}]"
-                diff_colored = click.style(
-                    diff_label,
-                    fg=DIFFICULTY_COLORS.get(ex.difficulty, "white")
-                )
-                worker = "👷" if ex.requires_worker else " "
-                worker_padded = _pad_display(worker, 2)
-                
-                # Print row with consistent spacing
-                click.echo(
-                    f"{row_indent}{numbered_key:<6} "
-                    f"{worker_padded} "
-                    f"{diff_colored:<23}  "  # Allow space for ANSI codes
-                    f"{ex.description}"
-                )
-            
-            example_counter += 1
+        subdomain_counter = 1
+
+        # Sort subdomains: empty string first (for non-nested), then by number
+        sorted_subdomains = sorted(by_subdomain.keys(), key=lambda x: ("0" if x == "" else x))
+
+        for subdomain in sorted_subdomains:
+            subdomain_examples = sorted(by_subdomain[subdomain], key=lambda x: x.path.name)
+
+            # Print subdomain header if it exists
+            if subdomain and not silent:
+                subdomain_title = subdomain.upper().replace('_', ' ')
+                click.echo(f"{row_indent}├─ {order_num}.{subdomain_counter}. {subdomain_title}")
+
+            sub_item_counter = 1
+            for ex in subdomain_examples:
+                # Apply difficulty filter
+                if difficulty_filter and ex.difficulty != difficulty_filter:
+                    continue
+
+                key = f"{cat}/{ex.name}"
+                if subdomain:
+                    numbered_key = f"{order_num}.{subdomain_counter}.{sub_item_counter}"
+                else:
+                    numbered_key = f"{order_num}.{example_counter}"
+
+                # Build mapping
+                mapping[numbered_key] = key
+                mapping[key] = key
+
+                if not silent:
+                    # Format row
+                    diff_label = f"[{ex.difficulty}]"
+                    diff_colored = click.style(
+                        diff_label,
+                        fg=DIFFICULTY_COLORS.get(ex.difficulty, "white")
+                    )
+                    worker = "👷" if ex.requires_worker else " "
+                    worker_padded = _pad_display(worker, 2)
+
+                    # Adjust indentation for subdomain items
+                    item_indent = f"{row_indent}│  " if subdomain else row_indent
+
+                    # Print row with consistent spacing
+                    click.echo(
+                        f"{item_indent}{numbered_key:<8} "
+                        f"{worker_padded} "
+                        f"{diff_colored:<23}  "  # Allow space for ANSI codes
+                        f"{ex.description}"
+                    )
+
+                if subdomain:
+                    sub_item_counter += 1
+                else:
+                    example_counter += 1
+
+            if subdomain:
+                subdomain_counter += 1
     
     # Footer
     if not silent:
@@ -167,7 +201,7 @@ def _display_examples_table(
 @dataclass
 class Example:
     """Represents a runnable example."""
-    
+
     path: Path
     category: str
     name: str
@@ -175,6 +209,7 @@ class Example:
     difficulty: str
     requires_worker: bool = False
     cleanup_db: bool = True
+    subdomain: Optional[str] = None  # For nested examples like "real_world/etl"
 
 
 class ExampleRegistry:
@@ -218,13 +253,25 @@ class ExampleRegistry:
             if (match := re.match(r"\d+_(.+)", filename))
             else filename
         )
-        
+
+        # Detect subdomain (e.g., for 04_real_world/01_etl/file.py -> "etl")
+        subdomain = None
+        parent_dir = py_file.parent
+        # Check if the parent directory is NOT the category directory
+        # by checking if it starts with a number (indicating a subdomain)
+        if re.match(r"\d+_", parent_dir.name) and parent_dir != parent_dir.parent:
+            # Verify it's truly a subdomain by checking parent's parent contains category
+            grandparent = parent_dir.parent
+            if re.match(r"\d+_" + re.escape(category), grandparent.name):
+                if match := re.match(r"\d+_(.+)", parent_dir.name):
+                    subdomain = match.group(1)
+
         # Parse docstring for metadata
         metadata = self._parse_docstring(py_file)
-        
+
         # Create lookup key
         key = f"{category}/{name}"
-        
+
         self.examples[key] = Example(
             path=py_file,
             category=category,
@@ -233,6 +280,7 @@ class ExampleRegistry:
             difficulty=metadata.get("difficulty", "intermediate"),
             requires_worker=metadata.get("requires_worker", False),
             cleanup_db=metadata.get("cleanup_db", True),
+            subdomain=subdomain,
         )
     
     def _parse_docstring(self, py_file: Path) -> Dict[str, any]:
