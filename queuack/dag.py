@@ -37,6 +37,7 @@ import networkx as nx
 
 from .data_models import DAGNode, DAGValidationError, JobSpec
 from .job_store import JobStore
+from .mermaid_colors import MermaidColorScheme
 from .status import DAGRunStatus, DependencyMode, NodeStatus
 
 
@@ -386,13 +387,28 @@ class DAGEngine:
         """
         return nx.dag_longest_path(self.graph)
 
-    def export_mermaid(self) -> str:
+    def export_mermaid(self, color_scheme: Optional[MermaidColorScheme] = None) -> str:
         """
         Export DAG to Mermaid diagram format.
 
+        Args:
+            color_scheme: Optional custom color scheme. If None, uses default colors.
+
         Returns:
             Mermaid markdown string
+
+        Example:
+            Default colors:
+            >>> dag.export_mermaid()
+
+            Custom colors:
+            >>> from queuack import MermaidColorScheme
+            >>> dark = MermaidColorScheme.dark_mode()
+            >>> dag.export_mermaid(color_scheme=dark)
         """
+        if color_scheme is None:
+            color_scheme = MermaidColorScheme.default()
+
         lines = ["graph TD"]
 
         # Create mapping from node_id to sanitized name for cleaner IDs
@@ -410,15 +426,17 @@ class DAGEngine:
             style = ""
 
             if node.status == NodeStatus.DONE:
-                style = ":::done"
+                style = color_scheme.get_status_class("done")
             elif node.status == NodeStatus.FAILED:
-                style = ":::failed"
+                style = color_scheme.get_status_class("failed")
             elif node.status == NodeStatus.SKIPPED:
-                style = ":::skipped"
+                style = color_scheme.get_status_class("skipped")
             elif node.status == NodeStatus.RUNNING:
-                style = ":::running"
+                style = color_scheme.get_status_class("running")
             elif node.status == NodeStatus.READY:
-                style = ":::ready"
+                style = color_scheme.get_status_class("ready")
+            elif node.status == NodeStatus.PENDING:
+                style = color_scheme.get_status_class("pending")
 
             lines.append(f'    {mermaid_id}["{label}"]{style}')
 
@@ -426,17 +444,9 @@ class DAGEngine:
         for parent, child in self.graph.edges:
             lines.append(f"    {parent} --> {child}")
 
-        # Add style definitions
-        lines.extend(
-            [
-                "",
-                "    classDef done fill:#90EE90",
-                "    classDef failed fill:#FFB6C6",
-                "    classDef skipped fill:#D3D3D3",
-                "    classDef running fill:#87CEEB",
-                "    classDef ready fill:#FFD700",
-            ]
-        )
+        # Add style definitions from color scheme
+        lines.append("")
+        lines.extend(color_scheme.get_style_definitions())
 
         return "\n".join(lines)
 
@@ -1147,14 +1157,17 @@ class DAGContext:
             [id_to_name.get(job_id, job_id) for job_id in level] for level in levels
         ]
 
-    def export_mermaid(self) -> str:
+    def export_mermaid(self, color_scheme: Optional[MermaidColorScheme] = None) -> str:
         """
         Export DAG to Mermaid diagram format.
+
+        Args:
+            color_scheme: Optional custom color scheme
 
         Returns:
             Mermaid markdown string
         """
-        return self.engine.export_mermaid()
+        return self.engine.export_mermaid(color_scheme=color_scheme)
 
     def __enter__(self):
         """Enter context."""
@@ -2174,33 +2187,48 @@ class DAG:
         """
         return self._context.get_execution_order()
 
-    def export_mermaid(self, include_subdags: bool = True, max_depth: int = 3) -> str:
+    def export_mermaid(
+        self,
+        include_subdags: bool = True,
+        max_depth: int = 3,
+        color_scheme: Optional[MermaidColorScheme] = None
+    ) -> str:
         """
         Export DAG structure as Mermaid diagram.
 
         Args:
             include_subdags: If True, expand sub-DAG jobs to show their structure
             max_depth: Maximum nesting depth to render (prevents infinite recursion)
+            color_scheme: Optional custom color scheme for visualization
 
         Returns:
             Mermaid markdown string
 
         Example:
-            # Simple diagram
+            # Simple diagram with default colors
             mermaid = dag.export_mermaid(include_subdags=False)
 
-            # Full hierarchy
-            mermaid = dag.export_mermaid(include_subdags=True)
+            # Full hierarchy with custom colors
+            from queuack import MermaidColorScheme
+            blue_scheme = MermaidColorScheme.blue_professional()
+            mermaid = dag.export_mermaid(include_subdags=True, color_scheme=blue_scheme)
         """
         if not self._submitted or not include_subdags:
             # Use simple engine export
-            return self._context.export_mermaid()
+            return self._context.export_mermaid(color_scheme=color_scheme)
 
         # Complex: include sub-DAG structure
-        return self._export_nested_mermaid(max_depth=max_depth)
+        return self._export_nested_mermaid(max_depth=max_depth, color_scheme=color_scheme)
 
-    def _export_nested_mermaid(self, max_depth: int = 3) -> str:
+    def _export_nested_mermaid(
+        self,
+        max_depth: int = 3,
+        color_scheme: Optional[MermaidColorScheme] = None
+    ) -> str:
         """Export with sub-DAG expansion."""
+        if color_scheme is None:
+            color_scheme = MermaidColorScheme.default()
+
         lines = ["graph TD"]
 
         # Track job->subdag mapping
@@ -2262,7 +2290,7 @@ class DAG:
                 lines.append("    end")
             else:
                 # Regular job
-                style = self._get_mermaid_style(job_info["status"])
+                style = self._get_mermaid_style(job_info["status"], color_scheme)
                 short_id = job_id[:8]
                 lines.append(f'    {short_id}["{job_name}"]{style}')
 
@@ -2288,30 +2316,24 @@ class DAG:
 
                 lines.append(f"    {parent_label} --> {child_label}")
 
-        # Add style definitions
-        lines.extend(
-            [
-                "",
-                "    classDef done fill:#90EE90",
-                "    classDef failed fill:#FFB6C6",
-                "    classDef skipped fill:#D3D3D3",
-                "    classDef running fill:#87CEEB",
-                "    classDef ready fill:#FFD700",
-            ]
-        )
+        # Add style definitions from color scheme
+        lines.append("")
+        lines.extend(color_scheme.get_style_definitions())
 
         return "\n".join(lines)
 
-    def _get_mermaid_style(self, status: str) -> str:
+    def _get_mermaid_style(self, status: str, color_scheme: Optional[MermaidColorScheme] = None) -> str:
         """Get Mermaid style class for job status."""
-        style_map = {
-            "done": ":::done",
-            "failed": ":::failed",
-            "skipped": ":::skipped",
-            "claimed": ":::running",
-            "pending": "",
+        if color_scheme is None:
+            color_scheme = MermaidColorScheme.default()
+
+        # Map job statuses to color scheme statuses
+        status_map = {
+            "claimed": "running",
+            "pending": "pending",
         }
-        return style_map.get(status, "")
+        mapped_status = status_map.get(status, status)
+        return color_scheme.get_status_class(mapped_status)
 
     def get_job(self, name_or_id: str) -> Optional["Job"]:
         """Get job by name or ID.

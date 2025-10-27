@@ -44,6 +44,9 @@ from .streaming import (
     StreamWriter,
     StreamReader,
 )
+from .mermaid_colors import (
+    MermaidColorScheme,
+)
 
 
 __all__ = [
@@ -73,6 +76,8 @@ __all__ = [
     # streaming exports
     "StreamWriter",
     "StreamReader",
+    # mermaid exports
+    "MermaidColorScheme",
     # status exports
     "DAGRunStatus",
     "NodeStatus",
