@@ -121,10 +121,17 @@ def _display_examples_table(
         if not silent:
             cat_title = cat.upper().replace('_', ' ')
             is_last = is_last_category(category_idx)
-            click.echo(f"\n┌─ 📁 {order_num}. {cat_title}")
-            if is_last:
-                click.echo("")  # No vertical line for last category
+            is_first = category_idx == 1
+
+            if is_first:
+                header_char = "┌─"
+            elif is_last:
+                header_char = "└─"
             else:
+                header_char = "├─"
+
+            click.echo(f"\n{header_char} 📁 {order_num}. {cat_title}")
+            if not is_last:
                 click.echo("│")
 
         # Group by subdomain if present
@@ -224,6 +231,10 @@ def _display_examples_table(
 
             if subdomain:
                 subdomain_counter += 1
+
+        # Add vertical continuation after last item if not last category
+        if not silent and not is_last:
+            click.echo("│")
     
     # Footer
     if not silent:
