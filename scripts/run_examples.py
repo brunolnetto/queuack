@@ -29,11 +29,12 @@ import click
 
 CATEGORY_ORDER = [
     "basic",
-    "workers", 
+    "workers",
     "dag_workflows",
     "real_world",
     "advanced",
     "integration",
+    "mlops",
 ]
 
 DIFFICULTY_COLORS = {
