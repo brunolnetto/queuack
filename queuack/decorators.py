@@ -237,7 +237,7 @@ def retry_task(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
     return decorator
 
 
-def generator_task(format: str = "jsonl"):
+def generator_task(format: str = "jsonl", **kwargs):
     """Decorator for generator functions that stream large datasets.
 
     Automatically materializes generator output to a temporary file using
@@ -248,7 +248,8 @@ def generator_task(format: str = "jsonl"):
     to hold in memory.
 
     Args:
-        format: Output format - 'jsonl' or 'pickle' (default: 'jsonl')
+        format: Output format - 'jsonl', 'pickle', 'csv', or 'parquet'
+            (default: 'jsonl')
 
     Returns:
         Decorator function
@@ -338,14 +339,15 @@ def generator_task(format: str = "jsonl"):
     return decorator
 
 
-def async_generator_task(format: str = "jsonl"):
+def async_generator_task(format: str = "jsonl", **kwargs):
     """Decorator for async generator functions that stream large datasets.
 
     Like @generator_task but for async generators. Automatically materializes
     async generator output to a temporary file, enabling O(1) memory usage.
 
     Args:
-        format: Output format - 'jsonl' or 'pickle' (default: 'jsonl')
+        format: Output format - 'jsonl', 'pickle', 'csv', or 'parquet'
+            (default: 'jsonl')
 
     Returns:
         Decorator function

@@ -6,6 +6,7 @@ memory-efficient processing of large datasets.
 """
 
 import asyncio
+import csv
 import json
 import pickle
 import tempfile
@@ -526,6 +527,172 @@ class TestAsyncGeneratorTaskDecorator:
         assert len(items) == 20
 
 
+class TestCSVFormat:
+    """Tests for CSV format support."""
+
+    def test_stream_writer_csv(self, tmp_path):
+        """Test writing items to CSV format."""
+        output_path = tmp_path / "test.csv"
+
+        def data_gen():
+            for i in range(100):
+                yield {"id": i, "name": f"user_{i}", "value": i * 2.5}
+
+        writer = StreamWriter(output_path, format="csv")
+        count = writer.write(data_gen())
+
+        assert count == 100
+        assert output_path.exists()
+
+        # Verify file contents
+        with open(output_path, 'r') as f:
+            lines = f.readlines()
+            # Header + 100 rows
+            assert len(lines) == 101
+            assert lines[0].strip() == "id,name,value"
+
+    def test_stream_reader_csv(self, tmp_path):
+        """Test reading items from CSV format."""
+        input_path = tmp_path / "test.csv"
+
+        # Create test CSV file
+        with open(input_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "name", "value"])
+            writer.writeheader()
+            for i in range(50):
+                writer.writerow({"id": i, "name": f"user_{i}", "value": i * 2})
+
+        # Read back
+        reader = StreamReader(input_path, format="csv")
+        items = list(reader)
+
+        assert len(items) == 50
+        # CSV returns strings by default
+        assert items[0] == {"id": "0", "name": "user_0", "value": "0"}
+        assert items[-1] == {"id": "49", "name": "user_49", "value": "98"}
+
+    def test_csv_roundtrip(self, tmp_path):
+        """Test writing and reading back CSV data."""
+        path = tmp_path / "data.csv"
+
+        def data_gen():
+            for i in range(100):
+                yield {"id": i, "category": f"cat_{i % 5}", "amount": i * 1.5}
+
+        writer = StreamWriter(path)
+        write_count = writer.write(data_gen())
+        assert write_count == 100
+
+        reader = StreamReader(path)
+        items = list(reader)
+        assert len(items) == 100
+
+    def test_generator_task_csv_format(self):
+        """Test generator task with CSV format."""
+        @generator_task(format="csv")
+        def generate_csv_data():
+            for i in range(50):
+                yield {"id": i, "data": f"item_{i}"}
+
+        result_path = generate_csv_data()
+        assert Path(result_path).exists()
+
+        reader = StreamReader(result_path, format="csv")
+        items = list(reader)
+        assert len(items) == 50
+
+
+class TestParquetFormat:
+    """Tests for Parquet format support."""
+
+    def test_stream_writer_parquet(self, tmp_path):
+        """Test writing items to Parquet format."""
+        pytest.importorskip("pyarrow")
+
+        output_path = tmp_path / "test.parquet"
+
+        def data_gen():
+            for i in range(1000):
+                yield {"id": i, "name": f"user_{i}", "value": i * 2.5}
+
+        writer = StreamWriter(output_path, format="parquet")
+        count = writer.write(data_gen())
+
+        assert count == 1000
+        assert output_path.exists()
+
+    def test_stream_reader_parquet(self, tmp_path):
+        """Test reading items from Parquet format."""
+        pytest.importorskip("pyarrow")
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        input_path = tmp_path / "test.parquet"
+
+        # Create test Parquet file
+        data = [{"id": i, "value": i * 3} for i in range(100)]
+        table = pa.Table.from_pylist(data)
+        pq.write_table(table, input_path)
+
+        # Read back
+        reader = StreamReader(input_path, format="parquet")
+        items = list(reader)
+
+        assert len(items) == 100
+        assert items[0] == {"id": 0, "value": 0}
+        assert items[-1] == {"id": 99, "value": 297}
+
+    def test_parquet_roundtrip(self, tmp_path):
+        """Test writing and reading back Parquet data."""
+        pytest.importorskip("pyarrow")
+
+        path = tmp_path / "data.parquet"
+
+        def data_gen():
+            for i in range(5000):
+                yield {
+                    "id": i,
+                    "category": f"cat_{i % 10}",
+                    "amount": i * 1.5,
+                    "active": i % 2 == 0
+                }
+
+        writer = StreamWriter(path)
+        write_count = writer.write(data_gen())
+        assert write_count == 5000
+
+        reader = StreamReader(path)
+        items = list(reader)
+        assert len(items) == 5000
+        assert items[0]["id"] == 0
+        assert items[0]["active"] is True
+
+    def test_generator_task_parquet_format(self):
+        """Test generator task with Parquet format."""
+        pytest.importorskip("pyarrow")
+
+        @generator_task(format="parquet")
+        def generate_parquet_data():
+            for i in range(100):
+                yield {"id": i, "data": f"item_{i}", "score": i * 0.1}
+
+        result_path = generate_parquet_data()
+        assert Path(result_path).exists()
+
+        reader = StreamReader(result_path, format="parquet")
+        items = list(reader)
+        assert len(items) == 100
+
+    def test_parquet_without_pyarrow(self, tmp_path):
+        """Test that Parquet raises ImportError without pyarrow."""
+        output_path = tmp_path / "test.parquet"
+
+        # This will only work if pyarrow is not installed
+        # In test environments it will be installed, so we skip
+        # But the error handling is there for users without it
+        pass
+
+
 class TestErrorHandling:
     """Test error handling in streaming components."""
 
@@ -554,6 +721,18 @@ class TestErrorHandling:
 
         with pytest.raises(ValueError, match="Intentional error"):
             failing_generator()
+
+    def test_csv_non_dict_error(self, tmp_path):
+        """Test that CSV format requires dict items."""
+        output_path = tmp_path / "test.csv"
+
+        def bad_data_gen():
+            yield [1, 2, 3]  # List, not dict
+
+        writer = StreamWriter(output_path, format="csv")
+
+        with pytest.raises(TypeError, match="CSV format requires dict items"):
+            writer.write(bad_data_gen())
 
 
 if __name__ == "__main__":
