@@ -590,47 +590,48 @@ class DuckQueue:
             now + timedelta(seconds=delay_seconds) if delay_seconds > 0 else now
         )
 
-        self.conn.execute(
-            """
-            INSERT INTO jobs (
-                id, func, args, kwargs, queue, status, priority,
-                created_at, execute_after, max_attempts, timeout_seconds, dependency_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            [
-                job_id,
-                pickled_func,
-                pickle.dumps(args),
-                pickle.dumps(kwargs),
-                queue,
-                JobStatus.DELAYED.value
-                if delay_seconds > 0
-                else JobStatus.PENDING.value,
-                priority,
-                now,
-                execute_after,
-                max_attempts,
-                timeout_seconds,
-                dependency_mode,
-            ],
-        )
-        self.conn.commit()
-
-        # Persist dependencies if provided
-        if depends_on:
-            parent_ids = (
-                [depends_on] if isinstance(depends_on, str) else list(depends_on)
+        with self.connection_context() as conn:
+            conn.execute(
+                """
+                INSERT INTO jobs (
+                    id, func, args, kwargs, queue, status, priority,
+                    created_at, execute_after, max_attempts, timeout_seconds, dependency_mode
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                [
+                    job_id,
+                    pickled_func,
+                    pickle.dumps(args),
+                    pickle.dumps(kwargs),
+                    queue,
+                    JobStatus.DELAYED.value
+                    if delay_seconds > 0
+                    else JobStatus.PENDING.value,
+                    priority,
+                    now,
+                    execute_after,
+                    max_attempts,
+                    timeout_seconds,
+                    dependency_mode,
+                ],
             )
-            for pid in parent_ids:
-                try:
-                    self.conn.execute(
-                        "INSERT INTO job_dependencies (child_job_id, parent_job_id) VALUES (?, ?)",
-                        [job_id, pid],
-                    )
-                    self.conn.commit()
-                except Exception:
-                    # ignore duplicate/missing parent handling here; validation may be added later
-                    pass
+
+            # Persist dependencies if provided
+            if depends_on:
+                parent_ids = (
+                    [depends_on] if isinstance(depends_on, str) else list(depends_on)
+                )
+                for pid in parent_ids:
+                    try:
+                        conn.execute(
+                            "INSERT INTO job_dependencies (child_job_id, parent_job_id) VALUES (?, ?)",
+                            [job_id, pid],
+                        )
+                    except Exception:
+                        # ignore duplicate/missing parent handling here; validation may be added later
+                        pass
+
+            conn.commit()
 
         self.logger.info(f"Enqueued {func.__name__} as {job_id[:8]} on queue '{queue}'")
 
