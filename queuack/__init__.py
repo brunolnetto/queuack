@@ -38,6 +38,7 @@ from .decorators import (
     timed_task,
     retry_task,
     generator_task,
+    async_task,
     async_generator_task,
 )
 from .streaming import (
@@ -72,6 +73,7 @@ __all__ = [
     "timed_task",
     "retry_task",
     "generator_task",
+    "async_task",
     "async_generator_task",
     # streaming exports
     "StreamWriter",

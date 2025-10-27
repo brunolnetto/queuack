@@ -54,6 +54,7 @@ Real-world examples you can adapt for your projects.
 - `ml_training_pipeline.py` - ML training with model comparison
 - `07_streaming_etl.py` - **NEW!** Memory-efficient streaming ETL (1M+ records)
 - `08_streaming_formats.py` - **NEW!** Multi-format exports (JSONL/CSV/Parquet/Pickle)
+- `09_async_api_fetching.py` - **NEW!** Async I/O for 10-100x speedup (API requests)
 
 ### 05_advanced/ - Advanced Patterns
 Advanced techniques for production deployments.

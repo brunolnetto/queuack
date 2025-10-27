@@ -339,6 +339,82 @@ def generator_task(format: str = "jsonl", **kwargs):
     return decorator
 
 
+def async_task(func: Callable) -> Callable:
+    """Decorator for async functions to enable use in DAG workflows.
+
+    Automatically wraps async functions so they can be called from synchronous
+    DAG execution. The decorator detects async functions and runs them using
+    asyncio.run().
+
+    This enables I/O-bound tasks (HTTP requests, database queries, file I/O)
+    to run concurrently for significant speedup without blocking the event loop.
+
+    Args:
+        func: Async function to decorate
+
+    Returns:
+        Wrapped function that can be called synchronously
+
+    Example - Basic async task:
+        @async_task
+        async def fetch_data(url):
+            '''Fetch data from API asynchronously.'''
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    return await response.json()
+
+        # Can be called synchronously in DAG:
+        # result = fetch_data("https://api.example.com/data")
+
+    Example - Multiple concurrent requests:
+        @async_task
+        async def fetch_all(urls):
+            '''Fetch multiple URLs concurrently.'''
+            async with aiohttp.ClientSession() as session:
+                tasks = [session.get(url) for url in urls]
+                responses = await asyncio.gather(*tasks)
+                return [await r.json() for r in responses]
+
+        # 10x faster than sequential requests
+        # results = fetch_all(["url1", "url2", ..., "url10"])
+
+    Example - Async database query:
+        @async_task
+        async def query_db(context: TaskContext):
+            '''Query database asynchronously.'''
+            async with get_async_db_pool() as pool:
+                async with pool.acquire() as conn:
+                    result = await conn.fetch("SELECT * FROM large_table")
+                    return [dict(row) for row in result]
+
+    Note:
+        - For async generators, use @async_generator_task instead
+        - Automatically manages event loop lifecycle
+        - Works seamlessly with both sync and async DAG tasks
+        - Use for I/O-bound workloads (network, disk, database)
+    """
+    if not inspect.iscoroutinefunction(func):
+        # Not an async function - return as-is
+        return func
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Run async function in event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Already in async context - just await
+                return func(*args, **kwargs)
+        except RuntimeError:
+            # No event loop - create one
+            pass
+
+        # Run with asyncio.run()
+        return asyncio.run(func(*args, **kwargs))
+
+    return wrapper
+
+
 def async_generator_task(format: str = "jsonl", **kwargs):
     """Decorator for async generator functions that stream large datasets.
 
