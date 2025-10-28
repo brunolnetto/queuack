@@ -12,6 +12,11 @@ on:
         default: 'false'
 
 jobs:
+  # Required permissions for creating releases and pushing packages
+  permissions:
+    contents: write
+    packages: write
+
   generate_and_release:
     name: Generate release notes and create Release
     runs-on: ubuntu-latest
@@ -44,9 +49,10 @@ jobs:
       - name: Create GitHub Release (draft for review)
         uses: ncipollo/release-action@v1
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          body_path: RELEASE_NOTES_v${{ github.ref_name }}.md
+          bodyFile: RELEASE_NOTES_v${{ github.ref_name }}.md
           draft: true
           prerelease: false
 
