@@ -120,6 +120,9 @@ tag: ## create git tag for current version
 	git push --tags
 	@echo "Created git tag v$(PACKAGE_VERSION)! 🏷️"
 
+pre-release: bump gen-release-notes tag ## prepare a new release
+	@echo "Pre-release steps completed for version $(PACKAGE_VERSION)! 🚀"
+
 release: ## release package on PyPI
 	gh workflow run release.yml -ref main --field publish=true 
 	@echo "Released version $(PACKAGE_VERSION) to PyPI! 🚀"
