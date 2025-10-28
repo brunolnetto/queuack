@@ -78,77 +78,77 @@ def _pad_display(s: str, target: int) -> str:
         return s
     return s + (" " * (target - cur))
 
-
 def _display_examples_table(
     examples_by_cat: Dict[str, List["Example"]],
     category_filter: Optional[str] = None,
     difficulty_filter: Optional[str] = None,
-    silent: bool = False  # NEW: Don't print, just build mapping
+    silent: bool = False
 ) -> Dict[str, str]:
-    """Display examples in consistent numbered table format.
-    
-    Args:
-        examples_by_cat: Examples grouped by category
-        category_filter: Optional category to filter by
-        difficulty_filter: Optional difficulty to filter by
-        silent: If True, only build mapping without printing
-    
-    Returns:
-        Mapping dict for numeric key lookups (e.g., "1.1" -> "basic/simple_queue")
-    """
+    """Display examples in consistent numbered table format."""
     if not examples_by_cat:
         if not silent:
             click.echo("❌ No examples found")
         return {}
-    
+
     mapping = {}
 
-    is_last_category = lambda cat_idx: cat_idx == len([c for c in CATEGORY_ORDER if examples_by_cat.get(c)])
+    # compute how many categories actually have examples so we can detect "last"
+    active_categories = [c for c in CATEGORY_ORDER if examples_by_cat.get(c)]
+    is_last_category = lambda cat_idx: cat_idx == len(active_categories)
+
+    # helper to centralize printing and detect blank lines
+    last_was_blank = False
+
+    def emit(s: str = "") -> None:
+        nonlocal last_was_blank
+        if s == "":
+            # only emit a blank line if the previous line wasn't blank
+            if not last_was_blank:
+                click.echo()
+                last_was_blank = True
+        else:
+            click.echo(s)
+            last_was_blank = (s.strip() == "")
 
     category_idx = 0
     for order_num, cat in enumerate(CATEGORY_ORDER, 1):
         examples = examples_by_cat.get(cat, [])
 
-        # Apply filters
+        # Apply category filter
         if category_filter and cat != category_filter:
             continue
         if not examples:
             continue
 
         category_idx += 1
+        is_last = is_last_category(category_idx)
+        is_first = category_idx == 1
 
-        # Category header
+        # Category header: emit exactly one blank line between categories,
+        # but avoid emitting a blank if the last printed line is already blank.
         if not silent:
+            if not is_first:
+                emit()  # guarded blank line
             cat_title = cat.upper().replace('_', ' ')
-            is_last = is_last_category(category_idx)
-            is_first = category_idx == 1
-
             if is_first:
                 header_char = "┌─"
             elif is_last:
                 header_char = "└─"
             else:
                 header_char = "├─"
-
-            click.echo(f"\n{header_char} 📁 {order_num}. {cat_title}")
-            if not is_last:
-                click.echo("│")
+            emit(f"{header_char} 📁 {order_num}. {cat_title}")
 
         # Group by subdomain if present
         by_subdomain = {}
         for ex in examples:
             subdomain = ex.subdomain or ""
-            if subdomain not in by_subdomain:
-                by_subdomain[subdomain] = []
-            by_subdomain[subdomain].append(ex)
+            by_subdomain.setdefault(subdomain, []).append(ex)
 
         example_counter = 1
         subdomain_counter = 1
 
-        # Sort subdomains: empty string first (for non-nested), then by number
-        sorted_subdomains = sorted(by_subdomain.keys(), key=lambda x: ("0" if x == "" else x))
-
-        is_last = is_last_category(category_idx)
+        # Sort subdomains: empty string first (for non-nested), then by name
+        sorted_subdomains = sorted(by_subdomain.keys(), key=lambda x: ("" if x == "" else x))
 
         for subdomain in sorted_subdomains:
             subdomain_examples = sorted(by_subdomain[subdomain], key=lambda x: x.path.name)
@@ -159,13 +159,12 @@ def _display_examples_table(
                 is_last_subdomain = subdomain == sorted_subdomains[-1]
                 branch_char = "└─" if is_last_subdomain else "├─"
 
-                cat_prefix = "" if is_last else "│  "
-                click.echo(f"{cat_prefix}{branch_char} 📂 {order_num}.{subdomain_counter}. {subdomain_title}")
+                cat_prefix = "│     " if not is_last else "      "
+                emit(f"{cat_prefix}{branch_char} 📂 {order_num}.{subdomain_counter}. {subdomain_title}")
 
+                # Add continuation line after subdomain header only if it's NOT the last subdomain
                 if not is_last_subdomain:
-                    click.echo(f"{cat_prefix}│")
-                else:
-                    click.echo(f"{cat_prefix}")
+                    emit(f"{cat_prefix}│")
 
             sub_item_counter = 1
             for ex in subdomain_examples:
@@ -199,26 +198,35 @@ def _display_examples_table(
                         is_last_item = sub_item_counter == len(subdomain_examples)
                         item_branch = "└─" if is_last_item else "├─"
 
-                        if is_last:
-                            # Last category
+                        # Base category prefix: if category is last, don't draw the outer vertical '│'
+                        if not is_last:
+                            # category is not last, keep the leading '│' prefix
                             if is_last_subdomain:
-                                item_indent = f"   {item_branch} "
+                                # last subdomain in a non-last category:
+                                # keep category vertical then spaces for sub-level
+                                item_indent = "│     " + " " * 6
                             else:
-                                item_indent = f"│  │  {item_branch} "
+                                # not last subdomain in a non-last category:
+                                # show category vertical, then subdomain vertical, then spacing
+                                item_indent = "│     │     "
                         else:
-                            # Not last category
+                            # category is last: outer vertical shouldn't be printed
                             if is_last_subdomain:
-                                item_indent = f"│     {item_branch} "
+                                # last subdomain in last category -> no verticals
+                                item_indent = "      " + " " * 6
                             else:
-                                item_indent = f"│  │  {item_branch} "
+                                # not last subdomain in last category:
+                                # we still need to align under the subdomain header
+                                item_indent = "      │     "
+
                     else:
                         is_last_item = example_counter == len(subdomain_examples)
                         item_branch = "└─" if is_last_item else "├─"
-                        item_indent = f"{'│' if not is_last else ' '}  {item_branch} "
+                        item_indent = "│     " if not is_last else "      "
 
                     # Print row with consistent spacing
-                    click.echo(
-                        f"{item_indent}{numbered_key:<8} "
+                    emit(
+                        f"{item_indent}{item_branch} {numbered_key:<8} "
                         f"{worker_padded} "
                         f"{diff_colored:<23}  "
                         f"{ex.description}"
@@ -229,20 +237,27 @@ def _display_examples_table(
                 else:
                     example_counter += 1
 
+            # After subdomain items: add continuation line only if this subdomain is not the last subdomain
+            if subdomain and not silent:
+                is_last_subdomain = subdomain == sorted_subdomains[-1]
+                cat_prefix = "│     " if not is_last else "      "
+                if not is_last_subdomain:
+                    emit(f"{cat_prefix}│")
+
             if subdomain:
                 subdomain_counter += 1
 
-        # Add vertical continuation after last item if not last category
-        if not silent and not is_last:
-            click.echo("│")
-    
+        # No trailing vertical line or extra blank line here — header logic above handles separation.
+
     # Footer
     if not silent:
-        click.echo(f"\n{'─'*70}")
-        click.echo(f"💡 Legend: 👷 = Requires worker process")
-        click.echo(f"{'─'*70}")
+        emit()  # ensure a blank line before footer but avoid duplicates
+        emit(f"{'─'*70}")
+        emit(f"💡 Legend: 👷 = Requires worker process")
+        emit(f"{'─'*70}")
 
     return mapping
+
 
 # ============================================================================
 # Data Models
