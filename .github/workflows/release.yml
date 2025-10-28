@@ -11,11 +11,11 @@ on:
         required: false
         default: 'false'
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
-  # Required permissions for creating releases and pushing packages
-  permissions:
-    contents: write
-    packages: write
 
   generate_and_release:
     name: Generate release notes and create Release
