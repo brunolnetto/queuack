@@ -2,7 +2,7 @@
 
 <img src="https://github.com/brunolnetto/queuack/raw/main/images/mascot.png" width="200" alt="Queuack Mascot">
 
-**A pragmatic, feature-rich job queue and DAG workflow engine backed by DuckDB.**
+Queuack is a pragmatic, single-node job queue that stores jobs in a DuckDB table. It’s built for dev/test and small-to-medium production workloads where you want durability without the operational overhead of Redis/RabbitMQ/Celery.
 
 Perfect for dev/test environments and small-to-medium production workloads where you want:
 - ✅ **Persistent queues** without Redis/RabbitMQ complexity
