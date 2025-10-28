@@ -53,8 +53,9 @@ jobs:
   publish:
     name: Build and publish to PyPI (manual)
     needs: generate_and_release
-    # Only run when manually dispatched with publish=true and when PYPI token exists
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true' && secrets.PYPI_API_TOKEN != '' }}
+    # Only run when manually dispatched with publish=true. Secret presence is checked at runtime
+    # Note: referencing secrets in an `if` expression is not allowed by GitHub; avoid doing so.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -72,6 +73,10 @@ jobs:
           PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
           set -euo pipefail
+          if [ -z "${PYPI_API_TOKEN:-}" ]; then
+            echo "ERROR: PYPI_API_TOKEN secret is not set. Aborting publish." >&2
+            exit 1
+          fi
           python -m pip install --upgrade build twine
           python -m build
           python -m twine upload -u __token__ -p "$PYPI_API_TOKEN" dist/*
