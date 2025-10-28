@@ -32,38 +32,38 @@ from queuack import (
 # Sample DAG
 # ==============================================================================
 
+def extract_api():
+    """Extract data from API."""
+    return {"records": 1000, "source": "api"}
+
+def extract_db():
+    """Extract data from database."""
+    return {"records": 5000, "source": "database"}
+
+def transform(context):
+    """Transform combined data."""
+    api_data = context.upstream("extract_api")
+    db_data = context.upstream("extract_db")
+    return {
+        "total_records": api_data["records"] + db_data["records"],
+        "transformed": True
+    }
+
+def validate(context):
+    """Validate transformed data."""
+    data = context.upstream("transform")
+    return {"valid": data["total_records"] > 0}
+
+def load(context):
+    """Load data to warehouse."""
+    valid = context.upstream("validate")
+    if valid["valid"]:
+        return {"status": "loaded", "records": 6000}
+    return {"status": "skipped"}
+
 def create_sample_dag(queue):
     """Create a sample ETL pipeline DAG."""
     dag = DAG("etl_pipeline", queue=queue)
-
-    def extract_api():
-        """Extract data from API."""
-        return {"records": 1000, "source": "api"}
-
-    def extract_db():
-        """Extract data from database."""
-        return {"records": 5000, "source": "database"}
-
-    def transform(context):
-        """Transform combined data."""
-        api_data = context.upstream("extract_api")
-        db_data = context.upstream("extract_db")
-        return {
-            "total_records": api_data["records"] + db_data["records"],
-            "transformed": True
-        }
-
-    def validate(context):
-        """Validate transformed data."""
-        data = context.upstream("transform")
-        return {"valid": data["total_records"] > 0}
-
-    def load(context):
-        """Load data to warehouse."""
-        valid = context.upstream("validate")
-        if valid["valid"]:
-            return {"status": "loaded", "records": 6000}
-        return {"status": "skipped"}
 
     # Build the DAG
     dag.add_node(extract_api, name="extract_api")
