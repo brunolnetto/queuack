@@ -2,8 +2,7 @@
 
 <img src="https://github.com/brunolnetto/queuack/raw/main/images/mascot.png" width="200" alt="Queuack Mascot">
 
-Queuack (aka *DuckQueue*) is a pragmatic, single-node job queue that stores jobs in a DuckDB table.
-It’s built for dev/test and small-to-medium production workloads where you want durability without the operational overhead of Redis/RabbitMQ/Celery.
+Queuack is a pragmatic, single-node job queue that stores jobs in a DuckDB table. It’s built for dev/test and small-to-medium production workloads where you want durability without the operational overhead of Redis/RabbitMQ/Celery.
 
 This README is developer-focused: practical examples, caveats, and the exact behavior around backpressure and testing so you don't waste time chasing surprises.
 
