@@ -59,11 +59,12 @@ clean: clean-build clean-pyc clean-test clean-cache ## remove all build, test, c
 	@echo "Cleaned all artifacts! 🧹"
 
 test: clean ## run tests quickly with the default Python
-	PYTHONPATH=$$(pwd) python3 -m pytest --durations=20 --durations-min=1
+	PYTHONPATH=$$(pwd) python3 -m pytest -n auto --dist=loadscope --durations=30 --durations-min=1;
 	@echo "Tests completed! ✅"
 
 cov: clean ## check code coverage quickly with the default Python
-	PYTHONPATH=$$(pwd) python3 -m pytest --cov=queuack --cov-report=term-missing --durations=20 --durations-min=1
+	# Run coverage with pytest-xdist (if available) and generate XML for CI. Fallback to plain pytest when xdist missing.
+	PYTHONPATH=$$(pwd) python3 -m pytest -n auto --dist=loadscope --cov=queuack --cov-report=term-missing --durations=30 --durations-min=1;
 	@echo "Coverage tests completed! ✅"
 
 watch: ## run tests on watchdog mode

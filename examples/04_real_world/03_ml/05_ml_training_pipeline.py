@@ -43,10 +43,9 @@ Advanced Topics:
 """
 
 from examples.utils.tempfile import create_temp_path
-from queuack import DuckQueue
+from queuack import DAG
 
 db_path = create_temp_path("ml")
-queue = DuckQueue(db_path)
 
 
 def load_dataset(path: str):
@@ -88,17 +87,17 @@ def deploy_model(model: dict):
     return "DEPLOYED"
 
 
-with queue.dag("ml_pipeline") as dag:
-    load = dag.enqueue(load_dataset, args=("s3://data/training.csv",), name="load")
+with DAG("ml_pipeline") as dag:
+    dag.add_node(load_dataset, args=("s3://data/training.csv",), name="load")
 
-    preprocess = dag.enqueue(preprocess_data, name="preprocess", depends_on="load")
+    dag.add_node(preprocess_data, name="preprocess", depends_on="load")
 
-    split = dag.enqueue(split_data, name="split", depends_on="preprocess")
+    dag.add_node(split_data, name="split", depends_on="preprocess")
 
     # Train multiple models in parallel
     models = []
     for model_type in ["random_forest", "xgboost", "neural_net"]:
-        train = dag.enqueue(
+        dag.add_node(
             train_model,
             kwargs={"model_type": model_type},
             name=f"train_{model_type}",
@@ -106,12 +105,14 @@ with queue.dag("ml_pipeline") as dag:
             timeout_seconds=3600,  # 1 hour timeout
         )
 
-        eval = dag.enqueue(
+        dag.add_node(
             evaluate_model, name=f"eval_{model_type}", depends_on=f"train_{model_type}"
         )
         models.append(f"eval_{model_type}")
 
     # Deploy best model (ANY mode: first to finish)
-    deploy = dag.enqueue(
-        deploy_model, name="deploy", depends_on=models, dependency_mode="any"
-    )
+    dag.add_node(deploy_model, name="deploy", depends_on=models, dependency_mode="any")
+
+    print("Submitting ML training DAG and waiting for completion...")
+    dag.submit()
+    dag.wait_for_completion(poll_interval=0.5)

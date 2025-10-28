@@ -1,42 +1,66 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "queuack"
 version = "0.1.2"
-description = "A DuckDB-based queue manager"
+description = "A DuckDB-based workflow orchestrator"
 readme = "README.md"
 requires-python = ">=3.9"
 
 dependencies = [
   "duckdb>=1.4.1",
   "networkx>=3.2.1",
-  "cloudpickle>=3.1.1"]
+  "cloudpickle>=3.1.1",
+]
 
-[dependency-groups]
-test = [
-"pytest>=8.4.2",
-"pytest-cov>=7.0.0",
-"pytest-watch>=4.2.0",]
-
-lint = [
-"ruff>=0.14.1",
-"toml-sort>=0.24.3",]
-
+# These extras can be installed via:
+#   pip install .[web]
+#   pip install .[data,imaging]
+[project.optional-dependencies]
 web = [
-"fastapi>=0.119.1",
-"flask>=3.1.2",
-"uvicorn>=0.38.0",
-"websockets>=15.0.1",
-"flask-socketio>=5.5.1",]
+  "fastapi>=0.119.1",
+  "flask>=3.1.2",
+  "uvicorn[standard]>=0.38.0",
+  "websockets>=15.0.1",
+  "flask-socketio>=5.5.1",
+]
 
 data = [
-"pandas>=2.3.3",]
+  "pandas>=2.3.3",
+  "pyspark>=4.0.1",
+]
 
 imaging = [
-"pillow>=11.3.0",]
+  "pillow>=11.3.0",
+]
 
+# Optional: combine multiple extras for convenience
+all = [
+  "queuack[web,data,imaging,dev]",
+]
+
+# Development-only dependency groups for tools (not shipped)
+[dependency-groups]
 dev = [
-"click>=8.1.8",
-"requests>=2.32.5",
-"tabulate>=0.9.0",]
+  "click>=8.1.8",
+  "requests>=2.32.5",
+  "tabulate>=0.9.0",
+]
+
+test = [
+  "pytest>=8.4.2",
+  "pytest-cov>=7.0.0",
+  "pytest-watch>=4.2.0",
+  "pytest-xdist>=3.8.0",
+  "pytest-asyncio>=0.25.2",
+]
+
+lint = [
+  "ruff>=0.14.1",
+  "toml-sort>=0.24.3",
+]
 
 [tool.ruff]
 line-length = 88
@@ -50,20 +74,25 @@ select = [
   "I", # isort
   "B", # flake8-bugbear
   "C4", # flake8-comprehensions
-  "UP"] # pyupgrade
+  "UP", # pyupgrade
+]
 ignore = [
   "E501", # line too long, handled by formatter
-  "B008", # do not perform function calls in argument defaults
-  "C901"] # too complex
-
+  "B008", # function calls in default args
+  "C901", # too complex
+]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["B011"] # assert False
-"examples/*" = ["T201", "T203"] # print statements in examples
+"tests/*" = ["B011"]
+"examples/*" = ["T201", "T203"]
 
 [tool.setuptools.packages.find]
 include = ["queuack"]
 exclude = ["images"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.tox]
 envlist = ["py311"]

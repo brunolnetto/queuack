@@ -116,7 +116,7 @@ class AsyncDuckDB:
         self, timeout: Optional[float] = None
     ) -> duckdb.DuckDBPyConnection:
         """Get a connection from pool with timeout"""
-        start_time = time.time()
+    start_time = time.perf_counter()
 
         if self._is_memory:
             return self._shared_conn
@@ -131,7 +131,7 @@ class AsyncDuckDB:
                 conn.close()
                 conn = self._create_connection()
 
-            wait_time = time.time() - start_time
+            wait_time = time.perf_counter() - start_time
             if wait_time > 1.0:
                 logger.warning(f"Connection wait time: {wait_time:.2f}s")
 
@@ -191,7 +191,7 @@ class AsyncDuckDB:
         timeout = timeout or self.query_timeout
 
         def _execute():
-            start_time = time.time()
+            start_time = time.perf_counter()
             conn = self._get_connection()
             try:
                 if parameters:
@@ -199,7 +199,7 @@ class AsyncDuckDB:
                 else:
                     result = conn.execute(query).fetchall()
 
-                execution_time = time.time() - start_time
+                execution_time = time.perf_counter() - start_time
 
                 # Record metrics
                 self._record_metrics(
@@ -479,9 +479,9 @@ class AsyncDuckDB:
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check on database"""
         try:
-            start = time.time()
+            start = time.perf_counter()
             await self.execute("SELECT 1")
-            latency = time.time() - start
+            latency = time.perf_counter() - start
 
             return {
                 "status": "healthy",
@@ -556,13 +556,13 @@ async def main():
         print()
 
         # Cached query
-        start = time.time()
-        await db.execute("SELECT * FROM users WHERE id < 10", use_cache=True)
-        first_time = time.time() - start
+    start = time.perf_counter()
+    await db.execute("SELECT * FROM users WHERE id < 10", use_cache=True)
+    first_time = time.perf_counter() - start
 
-        start = time.time()
-        await db.execute("SELECT * FROM users WHERE id < 10", use_cache=True)
-        cached_time = time.time() - start
+    start = time.perf_counter()
+    await db.execute("SELECT * FROM users WHERE id < 10", use_cache=True)
+    cached_time = time.perf_counter() - start
 
         print(f"First query: {first_time * 1000:.2f}ms")
         print(f"Cached query: {cached_time * 1000:.2f}ms\n")

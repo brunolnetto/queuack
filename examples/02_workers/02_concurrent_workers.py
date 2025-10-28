@@ -53,7 +53,7 @@ print("👷 Processing 20 tasks with 4 concurrent threads...")
 print("Worker will exit automatically when all jobs are processed.")
 print()
 
-start = time.time()
+start = time.perf_counter()
 worker = Worker(queue, concurrency=4)
 
 processed = 0
@@ -74,7 +74,7 @@ try:
                 print("⏳ Waiting for remaining jobs to complete...")
             time.sleep(1.0)
 
-    duration = time.time() - start
+    duration = time.perf_counter() - start
 
     print()
     print(f"⏱️  Total execution time: {duration:.1f} seconds")
@@ -85,6 +85,6 @@ try:
     print("   (Sequential would have taken ~40 seconds)")
 
 except KeyboardInterrupt:
-    duration = time.time() - start
+    duration = time.perf_counter() - start
     print(f"\n🛑 Interrupted by user after {duration:.1f} seconds")
     print(f"Processed {processed} jobs before shutdown.")

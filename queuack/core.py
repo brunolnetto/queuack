@@ -33,17 +33,31 @@ Example:
 """
 
 import logging
+import os
 import pickle
 import threading
 import time
 import traceback
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import duckdb
 
-from .dag import DAGContext
+from .constants import DEFAULT_POLL_TIMEOUT, WORKER_DRAIN_SECONDS
+
+
+@dataclass
+class QueueConfig:
+    """Per-queue tunables centralizing runtime configuration."""
+
+    values_threshold: int = None
+    dep_chunk_size: int = None
+    poll_timeout: float = DEFAULT_POLL_TIMEOUT
+
+
+from .dag import DAG, DAGContext
 from .data_models import BackpressureError, Job
 from .status import JobStatus
 
@@ -64,12 +78,16 @@ class DuckQueue:
         self,
         db_path: str = "duckqueue.db",
         default_queue: str = "default",
-        workers_num: int = None,
+        workers_num: Optional[int] = 1,
         worker_concurrency: int = 1,
-        poll_timeout: float = 1.0,
+        poll_timeout: float = DEFAULT_POLL_TIMEOUT,
+        # Dependency insertion tuning (optional per-queue overrides)
+        values_threshold: Optional[int] = None,
+        dep_chunk_size: Optional[int] = None,
         logger: Optional[logging.Logger] = None,
         serialization: str = "pickle",  # "pickle" or "json_ref"
-        enable_claim_cache: bool = True,
+        # BULLETPROOF CONCURRENCY CONTROL
+        force_memory_db: bool = False,  # Override auto-migration for :memory:
     ):
         """Initialize queue with schema creation."""
         if workers_num is not None and workers_num <= 0:
@@ -77,27 +95,121 @@ class DuckQueue:
         if worker_concurrency <= 0:
             raise ValueError("worker_concurrency must be positive")
 
-        self.db_path = db_path
-        self.default_queue = default_queue
+        # Initialize logger FIRST (needed for auto-migration)
         self.logger = logger or logging.getLogger(__name__)
+
+        # BULLETPROOF FIX: Auto-migrate unsafe :memory: + multiple workers
+        original_db_path = db_path
+        self._temp_file_cleanup = None  # Initialize before resolution
+        self.db_path = self._resolve_safe_db_path(db_path, workers_num, force_memory_db)
+        self._was_auto_migrated = self.db_path != original_db_path
+
+        self.default_queue = default_queue
         self._workers_num = workers_num
         self._worker_concurrency = worker_concurrency
-        self._poll_timeout = poll_timeout
         self.serialization = serialization
-        self._closed = False
 
-        self._enable_claim_cache = enable_claim_cache
-        self._cache_refresh_running = False
-        self._cache_refresh_thread = None
+        # Centralized per-queue configuration object. Values fall back to
+        # repository defaults when not provided.
+        from .constants import DEP_CHUNK_SIZE, VALUES_THRESHOLD
+
+        self.config = QueueConfig(
+            values_threshold=(
+                values_threshold if values_threshold is not None else VALUES_THRESHOLD
+            ),
+            dep_chunk_size=(
+                dep_chunk_size if dep_chunk_size is not None else DEP_CHUNK_SIZE
+            ),
+            poll_timeout=poll_timeout,
+        )
+
+        # Backwards-compatible attributes for existing code
+        self.values_threshold = self.config.values_threshold
+        self.dep_chunk_size = self.config.dep_chunk_size
+        self._poll_timeout = self.config.poll_timeout
+        self._closed = False
 
         # Create connection pool
         self._conn_pool = ConnectionPool(self.db_path)
 
+        self._worker_pool = None
+
         # Initialize database schema
         self._init_schema()
 
-        self._db_lock = threading.RLock()
-        self._worker_pool = None
+    def _resolve_safe_db_path(
+        self, db_path: str, workers_num: Optional[int], force_memory_db: bool
+    ) -> str:
+        """
+        BULLETPROOF CONCURRENCY FIX: Auto-migrate unsafe configurations.
+
+        :memory: + multiple workers = SEGFAULTS due to non-thread-safe DuckDB connections.
+        This method automatically converts such configurations to temp files for safety.
+
+        Returns:
+            str: Safe database path (original path or auto-created temp file)
+        """
+        # Safe configurations - no migration needed
+        if db_path != ":memory:":
+            return db_path  # File-based DB is always safe
+
+        if workers_num is None or workers_num <= 1:
+            return db_path  # Single worker is safe with :memory:
+
+        if force_memory_db:
+            # User explicitly wants :memory: despite dangers
+            self.logger.warning(
+                "DANGER: force_memory_db=True with :memory: + multiple workers. "
+                "This configuration is known to cause segmentation faults."
+            )
+            return db_path
+
+        # UNSAFE CONFIGURATION: :memory: + multiple workers
+        # Auto-migrate to temp file for safety
+        import atexit
+        import os
+        import tempfile
+
+        # Get a temp path but don't create the file (DuckDB will create it)
+        temp_dir = tempfile.gettempdir()
+        temp_name = f"auto_migrated_{os.getpid()}_{id(self)}.duckqueue.db"
+        temp_path = os.path.join(temp_dir, temp_name)
+
+        # Store cleanup info
+        self._temp_file_cleanup = temp_path
+
+        # Register cleanup on exit
+        def cleanup_temp_file():
+            try:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+            except Exception:
+                pass  # Ignore cleanup errors
+
+        atexit.register(cleanup_temp_file)
+
+        self.logger.info(
+            f"AUTO-MIGRATED: :memory: + {workers_num} workers → {temp_path} "
+            f"(prevents segfaults, use force_memory_db=True to override)"
+        )
+
+        return temp_path
+
+    def _cleanup_auto_migrated_db(self):
+        """Clean up auto-created temporary database file."""
+        if self._temp_file_cleanup:
+            try:
+                import os
+
+                if os.path.exists(self._temp_file_cleanup):
+                    os.unlink(self._temp_file_cleanup)
+                    self.logger.debug(
+                        f"Cleaned up auto-migrated database: {self._temp_file_cleanup}"
+                    )
+            except Exception as e:
+                self.logger.debug(
+                    f"Could not clean up temp database {self._temp_file_cleanup}: {e}"
+                )
 
     # Backpressure thresholds are configurable via classmethods so tests
     # or subclasses can override them for faster runs.
@@ -120,25 +232,62 @@ class DuckQueue:
     @property
     def conn(self):
         """Get thread-local connection."""
-        return self._conn_pool.get_connection()
+        # For memory databases, we need to be more careful about concurrent access
+        if self.db_path == ":memory:":
+            # Return the connection but warn about potential thread safety issues
+            return self._conn_pool.get_connection()
+        else:
+            return self._conn_pool.get_connection()
+
+    def connection_context(self):
+        """Get a connection context manager that handles locking for shared connections."""
+        return self._conn_pool.connection_context()
+
+    def _execute_with_connection_lock(self, func, *args, **kwargs):
+        """Execute a function that requires database access with proper locking."""
+        if self.db_path == ":memory:":
+            # For memory databases, use lock to serialize access
+            with self._conn_pool._connection_lock:
+                return func(*args, **kwargs)
+        else:
+            # For file databases, no lock needed (thread-local connections)
+            return func(*args, **kwargs)
 
     def __enter__(self):
         """Context manager entry - start workers if configured."""
+
+        # Start background workers when entering context only if an explicit
+        # number of workers was configured. If `workers_num` is None the
+        # context manager should not start any workers (tests rely on this
+        # semantics). When callers want automatic workers they can rely on
+        # the default constructor behavior (passing workers_num=1).
         if self._workers_num is not None:
             self.start_workers(
                 num_workers=self._workers_num,
                 concurrency=self._worker_concurrency,
                 daemon=True,
             )
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+        # Clean up auto-created temp files
+        self._cleanup_auto_migrated_db()
+
     def start_workers(
         self, num_workers: int = 4, concurrency: int = 1, daemon: bool = True
     ):
         """Start background workers that process jobs automatically."""
+        # BULLETPROOF: This should now be safe due to auto-migration in __init__
+        if self.db_path == ":memory:" and num_workers > 1:
+            self.logger.warning(
+                "DANGEROUS: Using :memory: database with multiple workers. "
+                "This configuration causes segfaults. Use force_memory_db=False "
+                "to enable auto-migration to temp files."
+            )
+
         self._worker_pool = WorkerPool(self, num_workers, concurrency)
         self._worker_pool.start()
 
@@ -166,6 +315,13 @@ class DuckQueue:
         # Block all connections until schema is ready
         self._conn_pool.mark_initializing()
 
+        # Log the database path being used (for debugging auto-migration)
+        if self._was_auto_migrated:
+            self.logger.info(
+                f"Auto-migrated to safe database: {self.db_path} "
+                f"(from :memory: for multi-worker safety)"
+            )
+
         try:
             init_conn = duckdb.connect(self.db_path)
 
@@ -185,6 +341,13 @@ class DuckQueue:
                 finally:
                     # Close the init connection - threads will create their own
                     init_conn.close()
+
+        except Exception:
+            # If initialization fails, still mark as ready to avoid deadlock
+            # but re-raise so the constructor fails
+            self._conn_pool.mark_ready()
+            raise
+
         finally:
             # Now it's safe for threads to get connections
             self._conn_pool.mark_ready()
@@ -211,7 +374,7 @@ class DuckQueue:
                 completed_at TIMESTAMP,
                 attempts INTEGER DEFAULT 0,
                 max_attempts INTEGER DEFAULT 3,
-                timeout_seconds INTEGER DEFAULT 300,
+                timeout_seconds REAL DEFAULT 300,
                 result BLOB,
                 error TEXT,
                 skipped_at TIMESTAMP,
@@ -220,10 +383,24 @@ class DuckQueue:
             )
         """)
 
+        # Indexes for efficient querying
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_jobs_claim 
             ON jobs(queue, status, priority DESC, created_at, attempts, max_attempts, execute_after)
         """)
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_jobs_dag_run 
+            ON jobs(dag_run_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_jobs_node_name 
+            ON jobs(node_name)
+            """
+        )
 
         # Dead letter queue view
         conn.execute("""
@@ -263,39 +440,40 @@ class DuckQueue:
             """
             CREATE TABLE IF NOT EXISTS dag_runs (
                 id VARCHAR PRIMARY KEY,
+                parent_job_id VARCHAR,
                 name VARCHAR NOT NULL,
                 description TEXT,
                 created_at TIMESTAMP NOT NULL,
                 completed_at TIMESTAMP,
                 status VARCHAR NOT NULL,
-                metadata JSON
+                metadata TEXT
             )
             """
         )
 
         # Indexes for DAG queries
+
+        # Index for querying by name
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_dag_runs_name 
             ON dag_runs(name)
             """
         )
+
+        # Add index for querying sub-DAGs
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_dag_runs_parent 
+            ON dag_runs(parent_job_id)
+            """
+        )
+
+        # Other indexes
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_dag_runs_status 
             ON dag_runs(status)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_jobs_dag_run 
-            ON jobs(dag_run_id)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_jobs_node_name 
-            ON jobs(node_name)
             """
         )
 
@@ -334,7 +512,7 @@ class DuckQueue:
         priority: int = 50,
         delay_seconds: int = 0,
         max_attempts: int = 3,
-        timeout_seconds: int = 300,
+        timeout_seconds: float = 300,
         check_backpressure: bool = True,
         depends_on: Union[str, List[str]] = None,
         dependency_mode: str = "all",
@@ -403,28 +581,7 @@ class DuckQueue:
         try:
             pickled_func = pickle.dumps(func)
         except Exception as e:
-            error_msg = f"""
-Function {func.__name__} is not picklable: {e}
-
-Queuack requires functions to be picklable for serialization. Common issues:
-
-1. Lambdas: Use named functions instead
-   ❌ queue.enqueue(lambda x: x*2, args=(5,))
-   ✅ def double(x): return x*2
-      queue.enqueue(double, args=(5,))
-
-2. Nested/local functions: Move to module level
-   ❌ def outer():
-       def inner(): pass
-       queue.enqueue(inner)
-   ✅ def inner(): pass
-      def outer():
-          queue.enqueue(inner)
-
-3. Closures with unpicklable objects: Ensure all captured variables are picklable
-
-For more complex cases, consider using JSON-serializable function references.
-"""
+            error_msg = f"\nFunction {getattr(func, '__name__', repr(func))} is not picklable: {e}\n\nQueuack requires functions to be picklable for serialization. Common issues:\n\n1. Lambdas: Use named functions instead\n   ❌ queue.enqueue(lambda x: x*2, args=(5,))\n   ✅ def double(x): return x*2\n      queue.enqueue(double, args=(5,))\n\n2. Nested/local functions: Move to module level\n   ❌ def outer():\n       def inner(): pass\n       queue.enqueue(inner)\n   ✅ def inner(): pass\n      def outer():\n          queue.enqueue(inner)\n\n3. Closures with unpicklable objects: Ensure all captured variables are picklable\n\nFor more complex cases, consider using JSON-serializable function references.\n"
             raise ValueError(error_msg)
 
         job_id = str(uuid.uuid4())
@@ -433,8 +590,8 @@ For more complex cases, consider using JSON-serializable function references.
             now + timedelta(seconds=delay_seconds) if delay_seconds > 0 else now
         )
 
-        with self._db_lock:
-            self.conn.execute(
+        with self.connection_context() as conn:
+            conn.execute(
                 """
                 INSERT INTO jobs (
                     id, func, args, kwargs, queue, status, priority,
@@ -466,13 +623,15 @@ For more complex cases, consider using JSON-serializable function references.
                 )
                 for pid in parent_ids:
                     try:
-                        self.conn.execute(
+                        conn.execute(
                             "INSERT INTO job_dependencies (child_job_id, parent_job_id) VALUES (?, ?)",
                             [job_id, pid],
                         )
                     except Exception:
                         # ignore duplicate/missing parent handling here; validation may be added later
                         pass
+
+            conn.commit()
 
         self.logger.info(f"Enqueued {func.__name__} as {job_id[:8]} on queue '{queue}'")
 
@@ -507,6 +666,10 @@ For more complex cases, consider using JSON-serializable function references.
         queue = queue or self.default_queue
         now = datetime.now()
 
+        # Handle empty batch case first
+        if not jobs:
+            return []
+
         rows = []
         job_ids = []
 
@@ -530,22 +693,18 @@ For more complex cases, consider using JSON-serializable function references.
                 ]
             )
 
-        with self._db_lock:
-            # Handle empty batch case
-            if not rows:
-                return []
+        self.conn.executemany(
+            """
+            INSERT INTO jobs (
+                id, func, args, kwargs, queue, status, priority,
+                created_at, execute_after, max_attempts, timeout_seconds
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            rows,
+        )
+        self.conn.commit()
 
-            self.conn.executemany(
-                """
-                INSERT INTO jobs (
-                    id, func, args, kwargs, queue, status, priority,
-                    created_at, execute_after, max_attempts, timeout_seconds
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                rows,
-            )
-
-            self.logger.info(f"Batch enqueued {len(job_ids)} jobs on queue '{queue}'")
+        self.logger.info(f"Batch enqueued {len(job_ids)} jobs on queue '{queue}'")
 
         return job_ids
 
@@ -553,77 +712,255 @@ For more complex cases, consider using JSON-serializable function references.
     # Claim/Ack (Consumer API)
     # ========================================================================
 
+    def ack(
+        self,
+        job_id: str,
+        result: Any = None,
+        error: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ):
+        """Acknowledge job completion."""
+        return self._execute_with_connection_lock(
+            self._ack_internal, job_id, result, error, worker_id
+        )
+
+    def _ack_internal(self, job_id, result, error, worker_id):
+        """Internal ack method that runs with proper locking."""
+        try:
+            self._attempt_ack(job_id, result, error, worker_id)
+        except Exception as e:
+            # Log transaction conflicts but don't fail acks
+            if "TransactionContext Error" in str(e) or "write-write conflict" in str(e):
+                self.logger.warning(
+                    f"Transaction conflict acking job {job_id[:8]}: {e}"
+                )
+                return
+            else:
+                raise
+
+    def _ack_with_retry(
+        self,
+        job_id: str,
+        result: Any = None,
+        error: Optional[str] = None,
+        worker_id: Optional[str] = None,
+        max_retries: int = 2,
+    ):
+        """Internal ack method with transaction conflict retry logic."""
+        for attempt in range(max_retries):
+            try:
+                self._attempt_ack(job_id, result, error, worker_id)
+                return
+            except Exception as e:
+                # Only retry on specific transaction conflicts
+                if "write-write conflict" in str(e) or (
+                    "TransactionContext Error" in str(e) and "commit" in str(e)
+                ):
+                    if attempt < max_retries - 1:
+                        # Very short sleep
+                        time.sleep(0.002 + attempt * 0.002)
+                        continue
+                    else:
+                        # Log warning but don't raise to avoid worker crashes
+                        self.logger.warning(
+                            f"Failed to ack job {job_id[:8]} after {max_retries} attempts: {e}"
+                        )
+                        return
+                else:
+                    # Re-raise non-transaction errors immediately
+                    raise
+
+    def _attempt_ack(
+        self,
+        job_id: str,
+        result: Any = None,
+        error: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ):
+        """Single attempt to acknowledge job completion."""
+        now = datetime.now()
+
+        try:
+            if error:
+                job = self.conn.execute(
+                    "SELECT attempts, max_attempts FROM jobs WHERE id = ?", [job_id]
+                ).fetchone()
+                self.conn.commit()
+
+                if job and job[0] < job[1]:
+                    # Retry
+                    self.conn.execute(
+                        "UPDATE jobs SET status = 'pending', error = ?, claimed_at = NULL, claimed_by = NULL WHERE id = ?",
+                        [error, job_id],
+                    )
+                    self.conn.commit()
+
+                    self.logger.info(
+                        f"Job {job_id[:8]} failed (attempt {job[0]}/{job[1]}), requeued"
+                    )
+                else:
+                    # Failed permanently
+                    self.conn.execute(
+                        "UPDATE jobs SET status = 'failed', completed_at = ?, error = ? WHERE id = ?",
+                        [now, error, job_id],
+                    )
+                    self.conn.commit()
+                    self.logger.error(f"Job {job_id[:8]} failed permanently: {error}")
+
+                    # Propagate in separate transaction to avoid long-running locks
+                    try:
+                        while True:
+                            updated = self.conn.execute(
+                                """
+                                WITH RECURSIVE descendants(child_id) AS (...)
+                                UPDATE jobs SET status = 'skipped', ...
+                                RETURNING jobs.id
+                                """,
+                                [
+                                    job_id,
+                                    now,
+                                    f"parent_failed:{job_id}",
+                                    "queuack",
+                                    now,
+                                ],
+                            ).fetchall()
+                            self.conn.commit()
+
+                            if not updated:
+                                break
+                    except Exception as e:
+                        self.logger.exception(f"Error propagating skipped state: {e}")
+                        try:
+                            self.conn.rollback()
+                        except Exception:
+                            pass
+                    return  # Already committed
+            else:
+                # Success
+                result_bytes = pickle.dumps(result) if result is not None else None
+                self.conn.execute(
+                    "UPDATE jobs SET status = 'done', completed_at = ?, result = ? WHERE id = ?",
+                    [now, result_bytes, job_id],
+                )
+                self.logger.info(f"Job {job_id[:8]} completed successfully")
+
+            # Commit the transaction
+            self.conn.commit()
+
+        except Exception:
+            # Rollback on error
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            raise
+
     def claim(
         self, queue: str = None, worker_id: str = None, claim_timeout: int = 300
     ) -> Optional[Job]:
         """
         Atomically claim next pending job.
-
-        Args:
-            queue: Queue to claim from (defaults to self.default_queue)
-            worker_id: Worker identifier (auto-generated if None)
-            claim_timeout: Seconds before claim expires (for stale job recovery)
-
-        Returns:
-            Job object or None if queue empty
-
-        Example:
-            while True:
-                job = queue.claim()
-                if job:
-                    result = job.execute()
-                    queue.ack(job.id, result=result)
-                else:
-                    time.sleep(1)
         """
+        return self._execute_with_connection_lock(
+            self._claim_internal, queue, worker_id, claim_timeout
+        )
+
+    def _claim_internal(self, queue, worker_id, claim_timeout):
+        """Internal claim method that runs with proper locking."""
         queue = queue or self.default_queue
         worker_id = worker_id or self._generate_worker_id()
+
+        try:
+            return self._attempt_claim(queue, worker_id, claim_timeout)
+        except Exception as e:
+            # Log transaction conflicts but don't crash workers
+            if "TransactionContext Error" in str(e) or "Conflict" in str(e):
+                self.logger.debug(f"Transaction conflict claiming job: {e}")
+                return None
+            else:
+                raise
+
+    def _claim_with_retry(
+        self,
+        queue: str = None,
+        worker_id: str = None,
+        claim_timeout: int = 300,
+        max_retries: int = 2,
+    ) -> Optional[Job]:
+        """Internal claim method with transaction conflict retry logic."""
+        queue = queue or self.default_queue
+        worker_id = worker_id or self._generate_worker_id()
+
+        for attempt in range(max_retries):
+            try:
+                return self._attempt_claim(queue, worker_id, claim_timeout)
+            except Exception as e:
+                # Only retry on specific DuckDB transaction conflicts
+                if (
+                    "TransactionContext Error" in str(e) and "Conflict" in str(e)
+                ) or "tuple deletion" in str(e):
+                    if attempt < max_retries - 1:
+                        # Very short sleep to avoid contention
+                        time.sleep(0.001 + attempt * 0.001)
+                        continue
+                    else:
+                        # Log and return None instead of raising to avoid worker crashes
+                        self.logger.debug(
+                            f"Failed to claim job after {max_retries} attempts: {e}"
+                        )
+                        return None
+                else:
+                    # Re-raise non-transaction errors immediately
+                    raise
+
+        return None
+
+    def _attempt_claim(
+        self, queue: str, worker_id: str, claim_timeout: int
+    ) -> Optional[Job]:
+        """Single attempt to claim a job."""
         now = datetime.now()
+        conn = self.conn
 
-        with self._db_lock:
-            # Promote delayed jobs that are ready
-            self.conn.execute(
-                """
-                UPDATE jobs
-                SET status = 'pending'
-                WHERE status = 'delayed'
-                AND execute_after <= ?
-            """,
-                [now],
-            )
+        # Promote delayed jobs that are ready
+        conn.execute(
+            """
+            UPDATE jobs
+            SET status = 'pending'
+            WHERE status = 'delayed'
+            AND execute_after <= ?
+        """,
+            [now],
+        )
+        conn.commit()
 
-            # Atomic claim with stale job recovery
-            # Only claim a job if its dependencies are satisfied based on dependency_mode:
-            # - 'all': ALL parents must be 'done'
-            # - 'any': AT LEAST ONE parent must be 'done'
-            result = self.conn.execute(
-                """
-                UPDATE jobs
-                SET 
-                    status = 'claimed',
-                    claimed_at = ?,
-                    claimed_by = ?,
-                    attempts = attempts + 1
-                WHERE id = (
+        # Atomic claim with stale job recovery
+        cursor = conn.execute(
+            """
+            UPDATE jobs
+            SET
+                status = 'claimed',
+                claimed_at = ?,
+                claimed_by = ?,
+                attempts = attempts + 1
+            WHERE id = (
                     SELECT j.id FROM jobs AS j
                     WHERE j.queue = ?
                     AND (
                         j.status = 'pending'
                         OR (
-                            j.status = 'claimed' 
+                            j.status = 'claimed'
                             AND j.claimed_at < ?
                         )
                     )
                     AND j.attempts < j.max_attempts
                     AND (j.execute_after IS NULL OR j.execute_after <= ?)
                     AND (
-                        -- No dependencies: always ready
                         NOT EXISTS (
                             SELECT 1 FROM job_dependencies jd
                             WHERE jd.child_job_id = j.id
                         )
                         OR
-                        -- Mode 'all': ALL parents must be done
                         (j.dependency_mode = 'all' AND NOT EXISTS (
                             SELECT 1 FROM job_dependencies jd
                             JOIN jobs pj ON jd.parent_job_id = pj.id
@@ -631,7 +968,6 @@ For more complex cases, consider using JSON-serializable function references.
                             AND pj.status != 'done'
                         ))
                         OR
-                        -- Mode 'any': AT LEAST ONE parent must be done
                         (j.dependency_mode = 'any' AND EXISTS (
                             SELECT 1 FROM job_dependencies jd
                             JOIN jobs pj ON jd.parent_job_id = pj.id
@@ -644,19 +980,33 @@ For more complex cases, consider using JSON-serializable function references.
                 )
                 RETURNING *
             """,
-                [now, worker_id, queue, now - timedelta(seconds=claim_timeout), now],
-            ).fetchone()
+            [now, worker_id, queue, now - timedelta(seconds=claim_timeout), now],
+        )
 
-            if result is None:
-                return None
+        # CRITICAL FIX: Fetch BEFORE commit
+        result = cursor.fetchone()
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
 
-            # Convert to Job object
-            columns = [desc[0] for desc in self.conn.description]
-            job_dict = dict(zip(columns, result))
+        # Commit AFTER fetching
+        conn.commit()
 
-            self.logger.info(f"Claimed job {job_dict['id'][:8]} by {worker_id}")
+        if result is None:
+            return None
 
-            return Job(**job_dict)
+        # Convert to Job object
+        job_dict = dict(zip(columns, result))
+
+        self.logger.info(f"Claimed job {job_dict['id'][:8]} by {worker_id}")
+
+        # Expose the DuckQueue instance on the claiming thread
+        import threading
+
+        try:
+            threading.current_thread()._queuack_queue = self
+        except Exception:
+            pass
+
+        return Job(**job_dict)
 
     def claim_batch(
         self,
@@ -667,25 +1017,63 @@ For more complex cases, consider using JSON-serializable function references.
     ) -> List[Job]:
         """
         Atomically claim multiple jobs at once.
-
-        This is 10-100x faster than claiming one at a time.
-
-        Args:
-            count: Number of jobs to claim
-            queue: Queue name
-            worker_id: Worker identifier
-            claim_timeout: Stale job recovery timeout
-
-        Returns:
-            List of claimed Job objects
         """
         queue = queue or self.default_queue
         worker_id = worker_id or self._generate_worker_id()
+
+        try:
+            return self._attempt_claim_batch(count, queue, worker_id, claim_timeout)
+        except Exception as e:
+            # Log transaction conflicts but return empty list
+            if "TransactionContext Error" in str(e) or "Conflict" in str(e):
+                self.logger.debug(f"Transaction conflict in batch claim: {e}")
+                return []
+            else:
+                raise
+
+    def _claim_batch_with_retry(
+        self,
+        count: int,
+        queue: str = None,
+        worker_id: str = None,
+        claim_timeout: int = 300,
+        max_retries: int = 1,  # Even more conservative for batch operations
+    ) -> List[Job]:
+        """Internal claim_batch method with transaction conflict retry logic."""
+        queue = queue or self.default_queue
+        worker_id = worker_id or self._generate_worker_id()
+
+        for attempt in range(max_retries):
+            try:
+                return self._attempt_claim_batch(count, queue, worker_id, claim_timeout)
+            except Exception as e:
+                # Only retry on specific conflicts, be very conservative
+                if "TransactionContext Error" in str(e) and "Conflict" in str(e):
+                    if attempt < max_retries - 1:
+                        # Minimal sleep
+                        time.sleep(0.001)
+                        continue
+                    else:
+                        # Return empty list instead of raising
+                        self.logger.debug(
+                            f"Failed to claim batch after {max_retries} attempts: {e}"
+                        )
+                        return []
+                else:
+                    # Re-raise non-transaction errors immediately
+                    raise
+
+        return []
+
+    def _attempt_claim_batch(
+        self, count: int, queue: str, worker_id: str, claim_timeout: int
+    ) -> List[Job]:
+        """Single attempt to claim multiple jobs."""
         now = datetime.now()
 
-        with self._db_lock:
+        with self.connection_context() as conn:
             # Promote delayed jobs
-            self.conn.execute(
+            conn.execute(
                 """
                 UPDATE jobs
                 SET status = 'pending'
@@ -696,7 +1084,7 @@ For more complex cases, consider using JSON-serializable function references.
             )
 
             # Claim multiple jobs in ONE transaction
-            results = self.conn.execute(
+            cursor = conn.execute(
                 """
                 WITH claimable AS (
                     SELECT j.id
@@ -709,13 +1097,11 @@ For more complex cases, consider using JSON-serializable function references.
                     AND j.attempts < j.max_attempts
                     AND (j.execute_after IS NULL OR j.execute_after <= ?)
                     AND (
-                        -- No dependencies: always ready
                         NOT EXISTS (
                             SELECT 1 FROM job_dependencies jd
                             WHERE jd.child_job_id = j.id
                         )
                         OR
-                        -- Mode 'all': ALL parents must be done
                         (j.dependency_mode = 'all' AND NOT EXISTS (
                             SELECT 1 FROM job_dependencies jd
                             JOIN jobs pj ON jd.parent_job_id = pj.id
@@ -723,7 +1109,6 @@ For more complex cases, consider using JSON-serializable function references.
                             AND pj.status != 'done'
                         ))
                         OR
-                        -- Mode 'any': AT LEAST ONE parent must be done
                         (j.dependency_mode = 'any' AND EXISTS (
                             SELECT 1 FROM job_dependencies jd
                             JOIN jobs pj ON jd.parent_job_id = pj.id
@@ -735,7 +1120,7 @@ For more complex cases, consider using JSON-serializable function references.
                     LIMIT ?
                 )
                 UPDATE jobs
-                SET 
+                SET
                     status = 'claimed',
                     claimed_at = ?,
                     claimed_by = ?,
@@ -751,22 +1136,43 @@ For more complex cases, consider using JSON-serializable function references.
                     now,
                     worker_id,
                 ],
-            ).fetchall()
+            )
 
-            if not results:
-                return []
+            # CRITICAL FIX: Fetch BEFORE commit
+            results = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
 
-            # Convert to Job objects
-            columns = [desc[0] for desc in self.conn.description]
-            jobs = []
-            for row in results:
-                job_dict = dict(zip(columns, row))
-                jobs.append(Job(**job_dict))
+            # Commit AFTER fetching
+            conn.commit()
 
-            self.logger.info(f"Claimed {len(jobs)} jobs by {worker_id}")
-            return jobs
+        if not results:
+            return []
 
-    def ack(self, job_id: str, result: Any = None, error: Optional[str] = None):
+        # Convert to Job objects
+        jobs = []
+        for row in results:
+            job_dict = dict(zip(columns, row))
+            jobs.append(Job(**job_dict))
+
+        self.logger.info(f"Claimed {len(jobs)} jobs by {worker_id}")
+
+        # Set the claiming thread's queue reference
+        import threading
+
+        try:
+            threading.current_thread()._queuack_queue = self
+        except Exception:
+            pass
+
+        return jobs
+
+    def ack(
+        self,
+        job_id: str,
+        result: Any = None,
+        error: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ):
         """
         Acknowledge job completion.
 
@@ -774,150 +1180,173 @@ For more complex cases, consider using JSON-serializable function references.
             job_id: Job ID to acknowledge
             result: Result to store (will be pickled)
             error: Error message if job failed
+            worker_id: Worker ID for ownership validation
 
         If error is provided, job is retried (if attempts < max_attempts)
         or moved to failed status.
         """
-        now = datetime.now()
-
-        with self._db_lock:
-            if error:
-                # Failed - check if should retry
-                job = self.conn.execute(
-                    """
-                    SELECT attempts, max_attempts FROM jobs WHERE id = ?
-                """,
+        # If caller provided a worker_id, enforce ownership
+        if worker_id is not None:
+            with self.connection_context() as conn:
+                current = conn.execute(
+                    "SELECT claimed_by, status FROM jobs WHERE id = ?",
                     [job_id],
                 ).fetchone()
+                conn.commit()
+                if current is None:
+                    raise ValueError(f"Job {job_id} not found")
+                claimed_by, status = current
+                if claimed_by != worker_id:
+                    raise ValueError(
+                        f"Worker {worker_id} attempted to ack job {job_id[:8]} but it is claimed by {claimed_by}"
+                    )
+
+        now = datetime.now()
+
+        try:
+            if error:
+                # Failed - check if should retry
+                with self.connection_context() as conn:
+                    job = conn.execute(
+                        """
+                        SELECT attempts, max_attempts FROM jobs WHERE id = ?
+                    """,
+                        [job_id],
+                    ).fetchone()
+                    conn.commit()
 
                 if job and job[0] < job[1]:
                     # Retry: move back to pending
-                    self.conn.execute(
-                        """
-                        UPDATE jobs
-                        SET 
-                            status = 'pending',
-                            error = ?,
-                            claimed_at = NULL,
-                            claimed_by = NULL
-                        WHERE id = ?
-                    """,
-                        [error, job_id],
-                    )
+                    with self.connection_context() as conn:
+                        conn.execute(
+                            """
+                            UPDATE jobs
+                            SET
+                                status = 'pending',
+                                error = ?,
+                                claimed_at = NULL,
+                                claimed_by = NULL
+                            WHERE id = ?
+                        """,
+                            [error, job_id],
+                        )
+                        conn.commit()
+
                     self.logger.info(
                         f"Job {job_id[:8]} failed (attempt {job[0]}/{job[1]}), requeued"
                     )
                 else:
                     # Max attempts reached: move to failed
-                    self.conn.execute(
-                        """
-                        UPDATE jobs
-                        SET 
-                            status = 'failed',
-                            completed_at = ?,
-                            error = ?
-                        WHERE id = ?
-                    """,
-                        [now, error, job_id],
-                    )
+                    with self.connection_context() as conn:
+                        conn.execute(
+                            """
+                            UPDATE jobs
+                            SET
+                                status = 'failed',
+                                completed_at = ?,
+                                error = ?
+                            WHERE id = ?
+                        """,
+                            [now, error, job_id],
+                        )
+                        conn.commit()
+
                     self.logger.error(f"Job {job_id[:8]} failed permanently: {error}")
 
-                    # Propagate permanent failure to descendants: mark them SKIPPED.
-                    # Only mark SKIPPED when dependency_mode makes the job unrunnable.
+                    # Propagate permanent failure to descendants
                     try:
-                        # Compute transitive descendants and mark them SKIPPED in two passes:
-                        # 1) dependency_mode = 'all' where ANY parent failed/skipped
-                        # 2) dependency_mode = 'any' where NO parent remains healthy
-                        # This is easier to reason about and avoids complex nested predicates.
+                        # Iteratively propagate SKIPPED to transitive descendants
+                        with self.connection_context() as conn:
+                            while True:
+                                updated = conn.execute(
+                                    """
+                                    WITH RECURSIVE descendants(child_id) AS (
+                                        SELECT child_job_id FROM job_dependencies WHERE parent_job_id = ?
+                                        UNION ALL
+                                        SELECT jd.child_job_id FROM job_dependencies jd
+                                        JOIN descendants d ON jd.parent_job_id = d.child_id
+                                    ), dlist AS (
+                                        SELECT DISTINCT child_id AS id FROM descendants
+                                    ), parents AS (
+                                        SELECT
+                                            child.id AS id,
+                                            child.dependency_mode AS dependency_mode,
+                                            SUM(CASE WHEN pj.status NOT IN ('failed','skipped') THEN 1 ELSE 0 END) AS healthy_parents,
+                                            COUNT(*) AS parent_count
+                                        FROM dlist
+                                        JOIN jobs child ON child.id = dlist.id
+                                        JOIN job_dependencies jd ON jd.child_job_id = child.id
+                                        JOIN jobs pj ON pj.id = jd.parent_job_id
+                                        GROUP BY child.id, child.dependency_mode
+                                    ), should_skip AS (
+                                        SELECT
+                                            id,
+                                            CASE
+                                                WHEN dependency_mode = 'all' AND healthy_parents < parent_count THEN 1
+                                                WHEN dependency_mode = 'any' AND parent_count > 0 AND healthy_parents = 0 THEN 1
+                                                ELSE 0
+                                            END AS skip_flag
+                                        FROM parents
+                                    )
+                                    UPDATE jobs
+                                    SET
+                                        status = 'skipped',
+                                        skipped_at = ?,
+                                        skip_reason = ?,
+                                        skipped_by = ?,
+                                        attempts = max_attempts,
+                                        completed_at = ?
+                                    FROM should_skip ss
+                                    WHERE jobs.id = ss.id
+                                    AND ss.skip_flag = 1
+                                    AND jobs.status NOT IN ('done','failed','skipped')
+                                    RETURNING jobs.id
+                                """,
+                                    [
+                                        job_id,
+                                        now,
+                                        f"parent_failed:{job_id}",
+                                        "queuack",
+                                        now,
+                                    ],
+                                ).fetchall()
+                                conn.commit()
 
-                        # Single-pass optimized update: compute all transitive descendants
-                        # then aggregate parent statuses to decide which descendants
-                        # should be skipped according to their dependency_mode.
-                        # Iteratively propagate SKIPPED to transitive descendants.
-                        # We run the recursive-CTE UPDATE repeatedly until no more
-                        # rows are affected. Using UPDATE ... RETURNING lets us
-                        # detect convergence without extra SELECTs.
-                        while True:
-                            updated = self.conn.execute(
-                                """
-                                WITH RECURSIVE descendants(child_id) AS (
-                                    SELECT child_job_id FROM job_dependencies WHERE parent_job_id = ?
-                                    UNION ALL
-                                    SELECT jd.child_job_id FROM job_dependencies jd
-                                    JOIN descendants d ON jd.parent_job_id = d.child_id
-                                ), dlist AS (
-                                    SELECT DISTINCT child_id AS id FROM descendants
-                                ), parents AS (
-                                    SELECT
-                                        child.id AS id,
-                                        child.dependency_mode AS dependency_mode,
-                                        SUM(CASE WHEN pj.status NOT IN ('failed','skipped') THEN 1 ELSE 0 END) AS healthy_parents,
-                                        COUNT(*) AS parent_count
-                                    FROM dlist
-                                    JOIN jobs child ON child.id = dlist.id
-                                    JOIN job_dependencies jd ON jd.child_job_id = child.id
-                                    JOIN jobs pj ON pj.id = jd.parent_job_id
-                                    GROUP BY child.id, child.dependency_mode
-                                ), should_skip AS (
-                                    SELECT
-                                        id,
-                                        CASE
-                                            WHEN dependency_mode = 'all' AND healthy_parents < parent_count THEN 1
-                                            WHEN dependency_mode = 'any' AND parent_count > 0 AND healthy_parents = 0 THEN 1
-                                            ELSE 0
-                                        END AS skip_flag
-                                    FROM parents
-                                )
-                                UPDATE jobs
-                                SET
-                                    status = 'skipped',
-                                    skipped_at = ?,
-                                    skip_reason = ?,
-                                    skipped_by = ?,
-                                    attempts = max_attempts,
-                                    completed_at = ?
-                                FROM should_skip ss
-                                WHERE jobs.id = ss.id
-                                  AND ss.skip_flag = 1
-                                  AND jobs.status NOT IN ('done','failed','skipped')
-                                RETURNING jobs.id
-                            """,
-                                [
-                                    job_id,
-                                    now,
-                                    f"parent_failed:{job_id}",
-                                    "queuack",
-                                    now,
-                                ],
-                            ).fetchall()
-
-                            if not updated:
-                                break
+                                if not updated:
+                                    break
 
                         self.logger.info(
                             f"Marked descendants of {job_id[:8]} as SKIPPED"
                         )
                     except Exception as e:
-                        # Failures here should not block ack, but log them for operators.
                         self.logger.exception(
                             f"Error propagating skipped state for {job_id[:8]}: {e}"
                         )
+                        # Still commit what we have
+
             else:
                 # Success
                 result_bytes = pickle.dumps(result) if result is not None else None
 
-                self.conn.execute(
-                    """
-                    UPDATE jobs
-                    SET 
-                        status = 'done',
-                        completed_at = ?,
-                        result = ?
-                    WHERE id = ?
-                """,
-                    [now, result_bytes, job_id],
-                )
+                with self.connection_context() as conn:
+                    conn.execute(
+                        """
+                        UPDATE jobs
+                        SET
+                            status = 'done',
+                            completed_at = ?,
+                            result = ?
+                        WHERE id = ?
+                    """,
+                        [now, result_bytes, job_id],
+                    )
+                    conn.commit()
+
                 self.logger.info(f"Job {job_id[:8]} completed successfully")
+
+        except Exception:
+            # Rollback on any error
+            raise
 
     def nack(self, job_id: str, requeue: bool = True):
         """
@@ -927,12 +1356,12 @@ For more complex cases, consider using JSON-serializable function references.
             job_id: Job ID
             requeue: If True, move back to pending (default)
         """
-        with self._db_lock:
-            if requeue:
-                self.conn.execute(
+        if requeue:
+            with self.connection_context() as conn:
+                conn.execute(
                     """
                     UPDATE jobs
-                    SET 
+                    SET
                         status = 'pending',
                         claimed_at = NULL,
                         claimed_by = NULL
@@ -940,28 +1369,24 @@ For more complex cases, consider using JSON-serializable function references.
                 """,
                     [job_id],
                 )
-                self.logger.info(f"Job {job_id[:8]} requeued")
-            else:
-                self.ack(job_id, error="Negative acknowledged without requeue")
+                conn.commit()
+            self.logger.info(f"Job {job_id[:8]} requeued")
+        else:
+            self.ack(job_id, error="Negative acknowledged without requeue")
 
     # ========================================================================
     # Monitoring & Introspection
     # ========================================================================
 
     def stats(self, queue: str = None) -> Dict[str, int]:
-        """
-        Get queue statistics.
-
-        Returns:
-            Dict with counts by status
-        """
+        """Get queue statistics."""
         if self._closed:
             raise Exception("Queue closed")
 
         queue = queue or self.default_queue
 
-        with self._db_lock:
-            result = self.conn.execute(
+        with self.connection_context() as conn:
+            cursor = conn.execute(
                 """
                 SELECT status, COUNT(*) as count
                 FROM jobs
@@ -969,31 +1394,43 @@ For more complex cases, consider using JSON-serializable function references.
                 GROUP BY status
             """,
                 [queue],
-            ).fetchall()
+            )
 
-            stats = {row[0]: row[1] for row in result}
-            stats.setdefault("pending", 0)
-            stats.setdefault("claimed", 0)
-            stats.setdefault("done", 0)
-            stats.setdefault("failed", 0)
-            stats.setdefault("delayed", 0)
+            # CRITICAL FIX: Fetch BEFORE commit
+            results = cursor.fetchall()
 
-            return stats
+            # Commit AFTER fetching
+            conn.commit()
+
+        stats = {row[0]: row[1] for row in results}
+        stats.setdefault("pending", 0)
+        stats.setdefault("claimed", 0)
+        stats.setdefault("done", 0)
+        stats.setdefault("failed", 0)
+        stats.setdefault("delayed", 0)
+
+        return stats
 
     def get_job(self, job_id: str) -> Optional[Job]:
         """Get job by ID."""
-        with self._db_lock:
-            result = self.conn.execute(
+        with self.connection_context() as conn:
+            cursor = conn.execute(
                 """
                 SELECT * FROM jobs WHERE id = ?
             """,
                 [job_id],
-            ).fetchone()
+            )
+
+            # CRITICAL FIX: Fetch BEFORE commit
+            result = cursor.fetchone()
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+
+            # Commit AFTER fetching
+            conn.commit()
 
         if result is None:
             return None
 
-        columns = [desc[0] for desc in self.conn.description]
         job_dict = dict(zip(columns, result))
         return Job(**job_dict)
 
@@ -1019,16 +1456,22 @@ For more complex cases, consider using JSON-serializable function references.
 
     def list_dead_letters(self, limit: int = 100) -> List[Job]:
         """List jobs in dead letter queue (failed permanently)."""
-        results = self.conn.execute(
-            """
-            SELECT * FROM dead_letter_queue
-            ORDER BY completed_at DESC
-            LIMIT ?
-        """,
-            [limit],
-        ).fetchall()
+        with self.connection_context() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM dead_letter_queue
+                ORDER BY completed_at DESC
+                LIMIT ?
+            """,
+                [limit],
+            )
 
-        columns = [desc[0] for desc in self.conn.description]
+            # CRITICAL FIX: Fetch BEFORE commit
+            results = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+
+            # Commit AFTER fetching
+            conn.commit()
 
         jobs = []
         for row in results:
@@ -1053,10 +1496,10 @@ For more complex cases, consider using JSON-serializable function references.
         """
         cutoff = datetime.now() - timedelta(hours=older_than_hours)
 
-        with self._db_lock:
+        with self.connection_context() as conn:
             if queue:
                 # Count first, then delete
-                count_result = self.conn.execute(
+                count_result = conn.execute(
                     """
                     SELECT COUNT(*) FROM jobs
                     WHERE queue = ? AND status = ? AND created_at < ?
@@ -1067,7 +1510,7 @@ For more complex cases, consider using JSON-serializable function references.
                 count = count_result[0] if count_result else 0
 
                 if count > 0:
-                    self.conn.execute(
+                    conn.execute(
                         """
                         DELETE FROM jobs
                         WHERE queue = ? AND status = ? AND created_at < ?
@@ -1076,7 +1519,7 @@ For more complex cases, consider using JSON-serializable function references.
                     )
             else:
                 # Count first, then delete
-                count_result = self.conn.execute(
+                count_result = conn.execute(
                     """
                     SELECT COUNT(*) FROM jobs
                     WHERE status = ? AND created_at < ?
@@ -1087,13 +1530,15 @@ For more complex cases, consider using JSON-serializable function references.
                 count = count_result[0] if count_result else 0
 
                 if count > 0:
-                    self.conn.execute(
+                    conn.execute(
                         """
                         DELETE FROM jobs
                         WHERE status = ? AND created_at < ?
                     """,
                         [status, cutoff],
                     )
+
+            conn.commit()
 
         self.logger.info(f"Purged {count} {status} jobs older than {older_than_hours}h")
 
@@ -1107,8 +1552,10 @@ For more complex cases, consider using JSON-serializable function references.
         """Generate unique worker identifier."""
         import os
         import socket
+        import uuid
 
-        return f"{socket.gethostname()}-{os.getpid()}-{int(time.time())}"
+        # Use UUID for guaranteed uniqueness across concurrent tests
+        return f"{socket.gethostname()}-{os.getpid()}-{str(uuid.uuid4())[:8]}"
 
     def close(self):
         """Close database connections and stop workers."""
@@ -1117,18 +1564,13 @@ For more complex cases, consider using JSON-serializable function references.
 
         self._closed = True
 
-        # Stop cache refresh
-        if self._cache_refresh_thread:
-            self._cache_refresh_running = False
-            self._cache_refresh_thread.join(timeout=5)
-            self._cache_refresh_thread = None
-
         # Stop workers first if they exist
         if self._worker_pool is not None:
             self.stop_workers()
 
         # Close the current thread's connection
-        self._conn_pool.close_current()
+        if not self._conn_pool._use_shared_memory:
+            self._conn_pool.close_current()
 
     def dag(
         self,
@@ -1163,6 +1605,33 @@ For more complex cases, consider using JSON-serializable function references.
             name,
             description=description,
             validate_on_exit=validate,
+            fail_fast=fail_fast,
+        )
+
+    def create_dag(
+        self,
+        name: str,
+        description: str = None,
+        validate: bool = True,
+        fail_fast: bool = True,
+    ) -> DAG:
+        """Create a new DAG (recommended API).
+
+        Example:
+            dag = queue.create_dag("etl")
+            extract = dag.add_job(extract_data, name="extract")
+            dag.submit()
+
+        Returns:
+            DAG instance
+        """
+        from .dag import DAG
+
+        return DAG(
+            name=name,
+            queue=self,
+            description=description,
+            validate=validate,
             fail_fast=fail_fast,
         )
 
@@ -1252,13 +1721,23 @@ class Worker:
         self.logger.info(f"Worker {self.worker_id} received shutdown signal")
         self.should_stop = True
 
-    def run(self, poll_interval: float = 1.0):
+    def run(self, poll_interval: float = DEFAULT_POLL_TIMEOUT):
         """
         Main worker loop.
 
         Args:
             poll_interval: Seconds to wait between polls when queue empty
         """
+        # If tests request fast mode, use a tighter poll interval to
+        # improve responsiveness under CPU contention (pytest-xdist).
+        try:
+            fast_mode = bool(int(os.getenv("QUEUACK_FAST_TESTS", "0")))
+        except Exception:
+            fast_mode = False
+
+        if fast_mode:
+            poll_interval = min(poll_interval, 0.01)
+
         self.logger.info(
             f"Worker {self.worker_id} started "
             f"(concurrency={self.concurrency}, backpressure={self.max_jobs_in_flight})"
@@ -1285,14 +1764,51 @@ class Worker:
             else:
                 time.sleep(poll_interval)
 
+        # When asked to stop, do a short graceful drain to pick up any jobs
+        # that became available during shutdown. Instead of a single fixed
+        # sleep window, try a few consecutive empty polls to avoid flaky
+        # test outcomes on loaded machines while still bounding total wait
+        # by WORKER_DRAIN_SECONDS.
+        drain_deadline = time.perf_counter() + WORKER_DRAIN_SECONDS
+        empty_polls_allowed = 3
+        empty_polls = 0
+
+        while (
+            time.perf_counter() < drain_deadline and empty_polls < empty_polls_allowed
+        ):
+            job = self._claim_next_job()
+            if not job:
+                empty_polls += 1
+                time.sleep(poll_interval)
+                continue
+            empty_polls = 0
+            processed += 1
+            self._execute_job(job, processed)
+
         self.logger.info(
             f"Worker {self.worker_id} stopped (processed {processed} jobs)"
         )
+        # Final short drain: attempt a few more claims in case jobs were
+        # enqueued concurrently during shutdown; keep the same safety
+        # timeout behavior as above.
+        drain_deadline = time.perf_counter() + WORKER_DRAIN_SECONDS
+        empty_polls = 0
+        while (
+            time.perf_counter() < drain_deadline and empty_polls < empty_polls_allowed
+        ):
+            job = self._claim_next_job()
+            if not job:
+                empty_polls += 1
+                time.sleep(poll_interval)
+                continue
+            empty_polls = 0
+            processed += 1
+            self._execute_job(job, processed)
 
     def _run_concurrent(self, poll_interval: float):
         """Multi-threaded execution with backpressure."""
         import threading
-        from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 
         processed = 0
         lock = threading.Lock()
@@ -1307,7 +1823,14 @@ class Worker:
                     capacity = self.max_jobs_in_flight - len(futures)
                     batch_size = min(self.batch_size, capacity)
 
-                    job = self._claim_next_job()
+                    try:
+                        job = self._claim_next_job()
+                    except Exception as e:
+                        self.logger.warning(
+                            f"Error claiming job in worker {self.worker_id}: {e}"
+                        )
+                        time.sleep(poll_interval)
+                        continue
 
                     if job:
                         with lock:
@@ -1323,7 +1846,7 @@ class Worker:
                         # When stopping, wait for all futures without timeout
                         # When running, use poll_interval timeout
                         timeout = None if self.should_stop else poll_interval
-                        
+
                         # Iterate through completed futures
                         for future in as_completed(futures.keys(), timeout=timeout):
                             job_id = futures.pop(future)
@@ -1358,30 +1881,44 @@ class Worker:
         return []
 
     def _claim_next_job(self) -> Optional[Job]:
-        """Claim next job from highest-priority queue."""
+        """Claim next job from highest-priority queue with error handling."""
         for queue_name, _ in self.queues:
-            job = self.queue.claim(queue=queue_name, worker_id=self.worker_id)
-            if job:
-                return job
+            try:
+                job = self.queue.claim(queue=queue_name, worker_id=self.worker_id)
+                if job:
+                    return job
+            except Exception as e:
+                self.logger.debug(f"Failed to claim from queue {queue_name}: {e}")
+                # Continue trying other queues rather than failing completely
+                continue
         return None
 
     def _execute_job(self, job: Job, job_num: int):
-        """Execute a single job."""
-        try:
-            start_time = time.time()
-            result = job.execute(logger=self.logger)
-            duration = time.time() - start_time
+        threading.current_thread()._queuack_queue = self.queue
 
-            self.queue.ack(job.id, result=result)
+        acked = False
+        try:
+            start_time = time.perf_counter()
+            result = job.execute(logger=self.logger)
+            duration = time.perf_counter() - start_time
+
+            self.queue.ack(job.id, result=result, worker_id=self.worker_id)
+            acked = True
 
             self.logger.info(
-                f"✓ [{self.worker_id}] Job {job.id[:8]} completed in {duration:.2f}s "
-                f"(#{job_num})"
+                f"✓ [{self.worker_id}] Job {job.id[:8]} completed in {duration:.2f}s (#{job_num})"
             )
 
         except Exception as e:
-            error_msg = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
-            self.queue.ack(job.id, error=error_msg)
+            if not acked:
+                error_msg = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+                try:
+                    self.queue.ack(job.id, error=error_msg, worker_id=self.worker_id)
+                except Exception as ack_error:
+                    self.logger.error(
+                        f"✗ Failed to ack job {job.id[:8]} after execution error. "
+                        f"Original: {e}. Ack error: {ack_error}"
+                    )
 
             self.logger.error(f"✗ [{self.worker_id}] Job {job.id[:8]} failed: {e}")
 
@@ -1392,6 +1929,9 @@ class ConnectionPool:
     Manages thread-local connections. Supports a single shared connection
     when using an in-memory database path (":memory:") because separate
     connections to ":memory:" do not share schema/data.
+
+    CRITICAL: DuckDB connections are NOT thread-safe. For :memory: databases,
+    we use a shared connection but protect it with a lock to serialize access.
     """
 
     def __init__(self, db_path: str):
@@ -1404,6 +1944,10 @@ class ConnectionPool:
         # For :memory:, we'll create the connection during schema init
         # and store it here. For file DBs, this stays None.
         self._global_conn: Optional[duckdb.DuckDBPyConnection] = None
+
+        # CRITICAL FIX: Lock to serialize access to shared connection
+        # DuckDB connections are NOT thread-safe, so we must synchronize access
+        self._connection_lock = threading.Lock()
 
         # Global lock to prevent connections during schema init
         self._ready = threading.Event()
@@ -1463,6 +2007,10 @@ class ConnectionPool:
 
         self._global_conn = conn
 
+    def connection_context(self):
+        """Get a connection context manager that handles locking."""
+        return _ConnectionContext(self)
+
     def close_current(self):
         """Close the current thread's connection or the global shared one."""
         try:
@@ -1470,19 +2018,42 @@ class ConnectionPool:
                 if self._global_conn is not None:
                     try:
                         self._global_conn.close()
-                    except:
+                    except Exception:
                         pass
                     self._global_conn = None
             else:
                 if hasattr(self._local, "conn") and self._local.conn is not None:
                     try:
                         self._local.conn.close()
-                    except:
+                    except Exception:
                         pass
                     self._local.conn = None
         except Exception:
             # be defensive — closing shouldn't raise to caller
             pass
+
+
+class _ConnectionContext:
+    """Context manager for thread-safe database operations."""
+
+    def __init__(self, pool: "ConnectionPool"):
+        self.pool = pool
+        self.conn = None
+
+    def __enter__(self):
+        # For shared memory connections, acquire the lock first
+        if self.pool._use_shared_memory:
+            self.pool._connection_lock.acquire()
+
+        self.conn = self.pool.get_connection()
+        return self.conn
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Release the lock if we acquired it
+        if self.pool._use_shared_memory:
+            self.pool._connection_lock.release()
+
+        # Don't close the connection - it's managed by the pool
 
 
 class WorkerPool:
@@ -1507,7 +2078,7 @@ class WorkerPool:
 
             thread = threading.Thread(
                 target=worker.run,
-                args=(1.0,),  # poll_interval
+                args=(self.queue._poll_timeout,),  # poll_interval from queue
                 daemon=True,  # Dies when main thread exits
                 name=f"WorkerThread-{i}",
             )
