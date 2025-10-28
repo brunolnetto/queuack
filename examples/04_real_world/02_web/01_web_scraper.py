@@ -46,10 +46,10 @@ from time import sleep
 import requests
 
 from examples.utils.tempfile import create_temp_path
-from queuack import DuckQueue
+from queuack import DAG
 
+# DAG will create and own a DuckQueue when no queue is passed.
 db_path = create_temp_path("scraper")
-queue = DuckQueue(db_path)
 
 
 def scrape_page(url: str):
@@ -203,50 +203,20 @@ urls = [
     "https://github.com/golang/go",
 ]
 
-# Build dag
-
-with queue.dag("web_scraping") as dag:
+with DAG("web_scraping") as dag:
     scrape_jobs = []
     for url in urls:
-        scrape_job = dag.enqueue(
-            scrape_page, args=(url,), name=f"scrape_{url.split('/')[-1]}"
-        )
-        scrape_jobs.append(scrape_job)
+        dag.add_node(scrape_page, args=(url,), name=f"scrape_{url.split('/')[-1]}")
+        scrape_jobs.append(f"scrape_{url.split('/')[-1]}")
 
     # Save results after all scraping is done
-    save_job = dag.enqueue(
+    dag.add_node(
         save_results, args=(scrape_jobs,), name="save_results", depends_on=scrape_jobs
     )
 
-print("✓ Web scraping DAG submitted")
-
-# Execute the DAG jobs
-print("\n🚀 Executing web scraping jobs...")
-import time
-
-processed = 0
-expected_jobs = len(urls) + 1  # scrape jobs + save job
-while processed < expected_jobs:
-    job = queue.claim()
-    if job:
-        processed += 1
-        print(f"📋 Processing job #{processed}: {job.id[:8]}")
-
-        try:
-            result = job.execute()
-            queue.ack(job.id, result=result)
-            print(f"✅ Completed job #{processed}")
-
-            # Show result summary for save job
-            if job.node_name == "save_results":
-                print(f"   💾 Saved {result} total results")
-
-        except Exception as e:
-            queue.ack(job.id, error=str(e))
-            print(f"❌ Failed job #{processed}: {e}")
-    else:
-        print("⏳ Waiting for jobs...")
-        time.sleep(0.5)
+    print("Submitting web scraping DAG and waiting for completion...")
+    dag.submit()
+    dag.wait_for_completion(poll_interval=0.5)
 
 print("\n🎉 Web scraping complete!")
 

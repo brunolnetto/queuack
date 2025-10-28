@@ -41,10 +41,9 @@ Advanced Topics:
 """
 
 from examples.utils.tempfile import create_temp_path
-from queuack import DuckQueue
+from queuack import DAG
 
 db_path = create_temp_path("reports")
-queue = DuckQueue(db_path)
 
 
 def fetch_sales_data(region: str):
@@ -72,13 +71,17 @@ def generate_pdf(data: dict):
 
 regions = ["north", "south", "east", "west"]
 
-for region in regions:
-    with queue.dag(f"report_{region}") as dag:
-        sales = dag.enqueue(fetch_sales_data, args=(region,), name="fetch_sales")
-        inventory = dag.enqueue(
-            fetch_inventory_data, args=(region,), name="fetch_inventory"
-        )
-        merge = dag.enqueue(
+with DAG("reports_master") as owner:
+    for region in regions:
+        dag = DAG(f"report_{region}", queue=owner.queue)
+
+        dag.add_node(fetch_sales_data, args=(region,), name="fetch_sales")
+        dag.add_node(fetch_inventory_data, args=(region,), name="fetch_inventory")
+        dag.add_node(
             merge_data, name="merge", depends_on=["fetch_sales", "fetch_inventory"]
         )
-        pdf = dag.enqueue(generate_pdf, name="generate_pdf", depends_on="merge")
+        dag.add_node(generate_pdf, name="generate_pdf", depends_on="merge")
+
+        print(f"Submitting report DAG for {region} and waiting for completion...")
+        dag.submit()
+        dag.wait_for_completion(poll_interval=0.5)

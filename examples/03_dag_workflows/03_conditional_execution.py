@@ -45,10 +45,8 @@ Advanced Topics:
 # Difficulty: advanced
 """
 
-from queuack import DuckQueue
+from queuack import DAG
 from queuack.status import DependencyMode
-
-queue = DuckQueue("conditional.db")
 
 
 def validate_source(source_name):
@@ -64,12 +62,12 @@ def process_data():
     return "Success"
 
 
-with queue.dag("conditional_dag") as dag:
-    validate_a = dag.enqueue(validate_source, args=("A",), name="validate_a")
-    validate_b = dag.enqueue(validate_source, args=("B",), name="validate_b")
+with DAG("conditional_dag") as dag:
+    validate_a = dag.add_node(validate_source, args=("A",), name="validate_a")
+    validate_b = dag.add_node(validate_source, args=("B",), name="validate_b")
 
     # Process if ANY source validates
-    process = dag.enqueue(
+    process = dag.add_node(
         process_data,
         name="process",
         depends_on=["validate_a", "validate_b"],
@@ -87,7 +85,7 @@ empty_polls = 0
 max_empty_polls = 3
 
 while empty_polls < max_empty_polls:
-    job = queue.claim()
+    job = dag.queue.claim()
     if job:
         processed += 1
         empty_polls = 0  # Reset counter
@@ -95,10 +93,10 @@ while empty_polls < max_empty_polls:
 
         try:
             result = job.execute()
-            queue.ack(job.id, result=result)
+            dag.queue.ack(job.id, result=result)
             print(f"✅ Completed job #{processed}")
         except Exception as e:
-            queue.ack(job.id, error=str(e))
+            dag.queue.ack(job.id, error=str(e))
             print(f"❌ Failed job #{processed}: {e}")
     else:
         empty_polls += 1
