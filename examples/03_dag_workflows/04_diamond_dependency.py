@@ -47,28 +47,49 @@ Advanced Topics:
 # Difficulty: advanced
 """
 
-from queuack import DAG
+from examples.utils.tempfile import create_temp_path
+from queuack import DuckQueue
+
+db_path = create_temp_path("diamond")
+queue = DuckQueue(db_path)
 
 
 def task_func(node_name: str) -> None:
     print(f"⚙️ Processing {node_name} task")
 
 
-with DAG("diamond") as dag:
-    start = dag.add_node(task_func, args=("Start",), name="start")
-    left = dag.add_node(task_func, args=("Left",), name="left", depends_on="start")
-    right = dag.add_node(task_func, args=("Right",), name="right", depends_on="start")
-    end = dag.add_node(
+with queue.dag("diamond") as dag:
+    start = dag.enqueue(task_func, args=("Start",), name="start")
+    left = dag.enqueue(task_func, args=("Left",), name="left", depends_on="start")
+    right = dag.enqueue(task_func, args=("Right",), name="right", depends_on="start")
+    end = dag.enqueue(
         task_func, args=("End",), name="end", depends_on=["left", "right"]
     )
 
-    print("Execution levels:", dag.get_execution_order())
-    # [['start'], ['left', 'right'], ['end']]
+print("Execution levels:", dag.get_execution_order())
+# [['start'], ['left', 'right'], ['end']]
 
-    # Submit and wait for completion
-    dag.submit()
+# Execute the DAG jobs
+print("\n🚀 Executing DAG jobs...")
+import time
 
-    dag.wait_for_completion()
+processed = 0
+expected_jobs = 4  # start + left + right + end
+while processed < expected_jobs:
+    job = queue.claim()
+    if job:
+        processed += 1
+        print(f"📋 Processing job #{processed}: {job.id[:8]}")
 
+        try:
+            result = job.execute()
+            queue.ack(job.id, result=result)
+            print(f"✅ Completed job #{processed}")
+        except Exception as e:
+            queue.ack(job.id, error=str(e))
+            print(f"❌ Failed job #{processed}: {e}")
+    else:
+        print("⏳ Waiting for jobs...")
+        time.sleep(0.5)
 
 print("\n🎉 DAG execution complete!")

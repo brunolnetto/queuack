@@ -44,9 +44,10 @@ Advanced Topics:
 from datetime import datetime
 
 from examples.utils.tempfile import create_temp_path
-from queuack import DAG
+from queuack import DuckQueue
 
 db_path = create_temp_path("etl")
+queue = DuckQueue(db_path)
 
 
 def extract_from_api(endpoint: str):
@@ -219,32 +220,67 @@ def load_to_warehouse():
     }
 
 
-# Build and run pipeline using the new DAG API. We start a DuckQueue
-# context so background workers are available to execute jobs automatically.
-with DAG("daily_etl", description="Daily ETL job") as dag:
-    dag.add_node(
+# Build pipeline
+with queue.dag("daily_etl", description="Daily ETL job") as dag:
+    extract = dag.enqueue(
         extract_from_api,
         args=("https://api.example.com/data",),
         name="extract",
-        max_attempts=5,
+        max_attempts=5,  # Retry API failures
     )
 
-    dag.add_node(validate_schema, name="validate", depends_on="extract")
+    validate = dag.enqueue(validate_schema, name="validate", depends_on="extract")
 
-    dag.add_node(transform_records, name="transform", depends_on="validate")
+    transform = dag.enqueue(transform_records, name="transform", depends_on="validate")
 
-    dag.add_node(
+    load = dag.enqueue(
         load_to_warehouse,
         name="load",
         depends_on="transform",
-        timeout_seconds=600,
+        timeout_seconds=600,  # 10 minute timeout
     )
 
-    print("Submitting ETL DAG and waiting for completion...")
-    run_id = dag.submit()
-    dag.wait_for_completion(poll_interval=0.5)
+# Monitor execution
+from queuack.dag import DAGRun
 
-    print("\n🎉 ETL pipeline execution complete!")
+dag_run = DAGRun(queue, dag.dag_run_id)
+
+# Check progress
+print(dag_run.get_progress())
+# {'pending': 3, 'claimed': 1, 'done': 0, 'failed': 0}
+
+# Execute the DAG jobs
+print("\n🚀 Executing ETL pipeline...")
+import time
+
+processed = 0
+expected_jobs = 4  # extract + validate + transform + load
+while processed < expected_jobs:
+    job = queue.claim()
+    if job:
+        processed += 1
+        print(f"📋 Processing job #{processed}: {job.id[:8]}")
+
+        try:
+            result = job.execute()
+            queue.ack(job.id, result=result)
+            print(f"✅ Completed job #{processed}")
+
+            # Show result summary for key jobs
+            if job.node_name == "transform":
+                print(f"   📊 Transformed {result['record_count']} records")
+                print(f"   💰 Total revenue: ${result['total_revenue']:.2f}")
+            elif job.node_name == "load":
+                print(f"   💾 Files created: {result['output_files']}")
+
+        except Exception as e:
+            queue.ack(job.id, error=str(e))
+            print(f"❌ Failed job #{processed}: {e}")
+    else:
+        print("⏳ Waiting for jobs...")
+        time.sleep(0.5)
+
+print("\n🎉 ETL pipeline execution complete!")
 
 # List generated files
 import os

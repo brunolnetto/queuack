@@ -31,7 +31,11 @@ Queuack Features Demonstrated:
 # Difficulty: beginner
 """
 
-from queuack import DAG
+from examples.utils.tempfile import create_temp_path
+from queuack import DuckQueue
+
+db_path = create_temp_path("linear")
+queue = DuckQueue(db_path)
 
 print("🦆 Linear Pipeline DAG Example")
 print("==============================")
@@ -59,19 +63,39 @@ print("🔧 Building DAG with dependencies...")
 print("   extract → transform → load")
 print()
 
-with DAG("etl_pipeline") as dag:
-    e = dag.add_node(extract, name="extract")
-    t = dag.add_node(transform, name="transform", depends_on="extract")
-    l = dag.add_node(load, name="load", depends_on="transform")
+with queue.dag("etl_pipeline") as dag:
+    e = dag.enqueue(extract, name="extract")
+    t = dag.enqueue(transform, name="transform", depends_on="extract")
+    l = dag.enqueue(load, name="load", depends_on="transform")
 
-    print("✓ DAG submitted. Execution order:")
-    execution_order = dag.get_execution_order()
-    for level, jobs in enumerate(execution_order):
-        print(f"   Level {level}: {jobs}")
-    print()
+print("✓ DAG submitted. Execution order:")
+execution_order = dag.get_execution_order()
+for level, jobs in enumerate(execution_order):
+    print(f"   Level {level}: {jobs}")
+print()
 
-    dag.submit()
-    dag.wait_for_completion(poll_interval=0.1)
+# Execute the DAG jobs
+print("🚀 Executing DAG jobs...")
+print("Expected order: extract → transform → load")
+print()
+import time
 
+processed = 0
+while processed < 3:  # We expect 3 jobs
+    job = queue.claim()
+    if job:
+        processed += 1
+        print(f"📋 Processing job #{processed}: {job.id[:8]}")
+
+        try:
+            result = job.execute()
+            queue.ack(job.id, result=result)
+            print(f"✅ Completed job #{processed}")
+        except Exception as e:
+            queue.ack(job.id, error=str(e))
+            print(f"❌ Failed job #{processed}: {e}")
+    else:
+        print("⏳ Waiting for jobs...")
+        time.sleep(0.5)
 
 print("\n🎉 DAG execution complete!")

@@ -47,12 +47,10 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from examples.utils.tempfile import create_temp_path
-from queuack import DAG
+from queuack import DuckQueue
 
-# DAG can own a DuckQueue when constructed with queue=None. We create a
-# top-level DAG to own the queue and then submit per-image DAGs using
-# the owned queue (accessed via `owner.queue`).
 db_path = create_temp_path("images")
+queue = DuckQueue(db_path)
 
 
 def load_image(path: str):
@@ -219,69 +217,59 @@ def save_image(input_path: str, output_path: str):
 image_files = ["landscape.jpg", "portrait.jpg", "abstract.jpg"]
 filters = ["BLUR", "CONTOUR", "EMBOSS"]
 
-print("\n🚀 Submitting image processing DAGs and executing jobs...")
-import os
-import time
-
-total_jobs = len(image_files) * 4  # 4 jobs per image (load, resize, filter, save)
-processed = 0
-
-# Create a top-level DAG that owns the queue; we'll submit per-image DAGs
-# using the owned queue (owner.queue) so all jobs share a single backend.
-with DAG("image_processing_master") as owner:
-    for i, img_file in enumerate(image_files):
-        dag = DAG(f"process_{img_file}", queue=owner.queue)
-
+for i, img_file in enumerate(image_files):
+    with queue.dag(f"process_{img_file}") as dag:
         # Each job works with the same base filename
-        dag.add_node(load_image, args=(img_file,), name="load")
-        dag.add_node(resize_image, args=(img_file,), name="resize", depends_on="load")
+        load = dag.enqueue(load_image, args=(img_file,), name="load")
+        resize = dag.enqueue(resize_image, args=(img_file,), name="resize")
 
         # Apply different filters to different images
         filter_type = filters[i % len(filters)]
-        dag.add_node(
+        blur = dag.enqueue(
             apply_filter,
             args=(f"resized_{img_file}", filter_type),
             name=f"filter_{filter_type.lower()}",
-            depends_on="resize",
         )
 
-        dag.add_node(
+        save = dag.enqueue(
             save_image,
             args=(
                 f"filtered_{filter_type.lower()}_resized_{img_file}",
                 f"processed_{img_file}",
             ),
             name="save",
-            depends_on=f"filter_{filter_type.lower()}",
         )
 
-        print(f"Submitting DAG for {img_file}...")
-        dag.submit()
+# Execute the image processing jobs
+print("\n🚀 Executing image processing jobs...")
+import time
 
-    # Use the owned queue to claim and execute jobs
-    queue = owner.queue
-    print("\n🚀 Executing image processing jobs...")
-    while processed < total_jobs:
-        job = queue.claim()
-        if job:
-            processed += 1
-            print(f"📋 Processing job #{processed}: {job.id[:8]}")
+total_jobs = len(image_files) * 3  # 3 jobs per image (load, resize, filter, save)
+processed = 0
 
-            try:
-                result = job.execute()
-                queue.ack(job.id, result=result)
-                print(f"✅ Completed job #{processed}")
+while processed < total_jobs:
+    job = queue.claim()
+    if job:
+        processed += 1
+        print(f"📋 Processing job #{processed}: {job.id[:8]}")
 
-            except Exception as e:
-                queue.ack(job.id, error=str(e))
-                print(f"❌ Failed job #{processed}: {e}")
-        else:
-            print("⏳ Waiting for jobs...")
-            time.sleep(0.5)
+        try:
+            result = job.execute()
+            queue.ack(job.id, result=result)
+            print(f"✅ Completed job #{processed}")
 
-    print("\n🎉 Image processing complete!")
+        except Exception as e:
+            queue.ack(job.id, error=str(e))
+            print(f"❌ Failed job #{processed}: {e}")
+    else:
+        print("⏳ Waiting for jobs...")
+        time.sleep(0.5)
+
+print("\n🎉 Image processing complete!")
 
 # List generated files
+import os
+
 print("\n📁 Generated files:")
 results_dir = "results"
 if os.path.exists(results_dir):
