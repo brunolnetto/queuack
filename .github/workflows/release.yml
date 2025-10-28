@@ -36,7 +36,7 @@ jobs:
           python3 scripts/generate_release_notes_ai.py --version "$VERSION" --range "$VERSION^..$VERSION"
 
       - name: Upload release notes artifact for review
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: release-notes-${{ github.ref_name }}
           path: RELEASE_NOTES_v${{ github.ref_name }}.md
