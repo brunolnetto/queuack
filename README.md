@@ -15,7 +15,6 @@ Perfect for dev/test environments and small-to-medium production workloads where
 
 ## 🎯 Why Queuack?
 
-<<<<<<< HEAD
 | Feature | Queuack | Celery + Redis | Airflow | MLflow + Kubeflow |
 |---------|---------|----------------|---------|-------------------|
 | **Setup** | `pip install queuack` | Install Redis, configure Celery | Docker compose, PostgreSQL, webserver | K8s cluster, multiple servers |
@@ -31,16 +30,6 @@ Perfect for dev/test environments and small-to-medium production workloads where
 - 📊 **Data Engineers** - Build ETL pipelines without Airflow overhead
 - 🚀 **Startups** - Ship fast without infrastructure complexity
 - 💻 **Solo Developers** - Full workflow engine on your laptop
-=======
-| Feature | Queuack | Celery + Redis | Airflow |
-|---------|---------|----------------|---------|
-| **Setup** | `pip install queuack` | Install Redis, configure Celery | Docker compose, PostgreSQL, webserver |
-| **DAG Workflows** | ✅ Built-in | ❌ Separate tools | ✅ Core feature |
-| **Streaming ETL** | ✅ O(1) memory | ❌ Load all data | ⚠️ Manual batching |
-| **Visualization** | ✅ Mermaid (6 themes) | ❌ None | ✅ Web UI (complex) |
-| **Local Development** | ✅ Single file | ⚠️ Need Redis | ⚠️ Need full stack |
-| **Memory Footprint** | ~50 MB | ~200 MB | ~2 GB |
->>>>>>> aba071e (docs(readme): Complete modernization and feature showcase)
 
 ---
 
@@ -97,13 +86,8 @@ def load(context):
 
 # Build pipeline
 dag.add_node(extract, name="extract")
-<<<<<<< HEAD
 dag.add_node(transform, name="transform", depends_on=["extract"])
 dag.add_node(load, name="load", depends_on=["transform"])
-=======
-dag.add_node(transform, name="transform", upstream=["extract"])
-dag.add_node(load, name="load", upstream=["transform"])
->>>>>>> aba071e (docs(readme): Complete modernization and feature showcase)
 
 # Execute
 dag.execute()
@@ -127,7 +111,6 @@ output_path = extract_data()
 reader = StreamReader(output_path)
 for row in reader:
     process(row)  # Memory stays constant
-<<<<<<< HEAD
 ```
 
 ### Async I/O (1 minute)
@@ -173,8 +156,6 @@ dag.execute()
 for params in param_grid:  # 54 combinations
     queue.enqueue(train_model, args=(params,))
 # Trains 4x faster with 4 workers, no Ray/Dask needed
-=======
->>>>>>> aba071e (docs(readme): Complete modernization and feature showcase)
 ```
 
 ---
@@ -210,25 +191,15 @@ stats = queue.stats()
 ```python
 # Fan-out/fan-in pattern
 dag.add_node(extract, name="extract")
-<<<<<<< HEAD
 dag.add_node(transform_a, name="transform_a", depends_on=["extract"])
 dag.add_node(transform_b, name="transform_b", depends_on=["extract"])
 dag.add_node(load, name="load", depends_on=["transform_a", "transform_b"])
-=======
-dag.add_node(transform_a, name="transform_a", upstream=["extract"])
-dag.add_node(transform_b, name="transform_b", upstream=["extract"])
-dag.add_node(load, name="load", upstream=["transform_a", "transform_b"])
->>>>>>> aba071e (docs(readme): Complete modernization and feature showcase)
 
 # Conditional execution (ANY mode)
 dag.add_node(
     validate,
     name="validate",
-<<<<<<< HEAD
     depends_on=["source_a", "source_b"],
-=======
-    upstream=["source_a", "source_b"],
->>>>>>> aba071e (docs(readme): Complete modernization and feature showcase)
     dependency_mode="any"  # Run when ANY parent completes
 )
 
@@ -322,10 +293,7 @@ Our examples follow a **progressive learning path**:
 - ML training pipelines
 - **NEW!** Streaming ETL (1M+ records)
 - **NEW!** Multi-format exports (JSONL/CSV/Parquet)
-<<<<<<< HEAD
 - **NEW!** Async API fetching (50x faster)
-=======
->>>>>>> aba071e (docs(readme): Complete modernization and feature showcase)
 
 #### [05_advanced/](examples/05_advanced) - Advanced Techniques
 - Custom backpressure
@@ -337,7 +305,6 @@ Our examples follow a **progressive learning path**:
 - Flask, FastAPI, Django
 - CLI tools
 
-<<<<<<< HEAD
 #### [07_mlops/](examples/07_mlops) - ML Engineering **NEW!**
 - **Parallel hyperparameter tuning** - Replace Ray/MLflow
 - **Complete ML pipelines** - Replace Airflow/Kubeflow
@@ -345,8 +312,6 @@ Our examples follow a **progressive learning path**:
 - Model training and deployment
 - No Kubernetes required!
 
-=======
->>>>>>> aba071e (docs(readme): Complete modernization and feature showcase)
 **Run any example:**
 ```bash
 cd examples/04_real_world
@@ -511,7 +476,6 @@ pytest -k "not test_large"
 - [x] Basic queue with priorities and delays
 - [x] DAG workflow engine
 - [x] Generator streaming (O(1) memory)
-<<<<<<< HEAD
 - [x] Multi-format support (CSV, Parquet, JSONL, Pickle)
 - [x] Mermaid visualization with themes
 - [x] Sub-DAG support
@@ -519,15 +483,6 @@ pytest -k "not test_large"
 
 ### In Progress 🚧
 - [ ] Storage backend abstraction (SQLite, PostgreSQL)
-=======
-- [x] Multi-format support (CSV, Parquet)
-- [x] Mermaid visualization with themes
-- [x] Sub-DAG support
-
-### In Progress 🚧
-- [ ] Storage backend abstraction (SQLite, PostgreSQL)
-- [ ] Async/await support for I/O-heavy tasks
->>>>>>> aba071e (docs(readme): Complete modernization and feature showcase)
 - [ ] Web UI for monitoring
 - [ ] Prometheus metrics
 
