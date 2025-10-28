@@ -106,18 +106,20 @@ bump: ## bump version to user-provided {patch|minor|major} semantic
 		exit 1; \
 	fi; \
 	python3 -c "import tomllib, sys, re; data = tomllib.load(open('pyproject.toml', 'rb')); parts = list(map(int, data['project']['version'].split('.'))); idx = {'patch': 2, 'minor': 1, 'major': 0}[sys.argv[1]]; parts[idx] += 1; parts[idx+1:] = [0] * (2 - idx); new_version = '.'.join(map(str, parts)); content = open('pyproject.toml').read(); updated = re.sub(r'version\s*=\s*\"[0-9]+\.[0-9]+\.[0-9]+\"', f'version = \"{new_version}\"', content); open('pyproject.toml', 'w').write(updated)" $(v)
-	git add pyproject.toml
-	git commit -m "release/ tag v$(PACKAGE_VERSION)"
-	git tag "v$(PACKAGE_VERSION)"
-	git push
-	git push --tags
 	@echo "Bumped version to $(PACKAGE_VERSION)! 🎉"
 
-publish: clean ## build source and publish package
-	uv build
-	uv publish
+gen-release-notes: ## generate release notes for current version using AI
+	PYTHONPATH=$$(pwd) python3 scripts/generate_release_notes_ai.py --version "$(PACKAGE_VERSION)" --range "$(git rev-list -n 1 "v$(PACKAGE_VERSION)")..$(git rev-parse HEAD)"
+	@echo "Generated release notes for version $(PACKAGE_VERSION)! 📝"
+
+tag: ## create git tag for current version
+	git add pyproject.toml
+	git commit -m "release: tag v$(PACKAGE_VERSION)"
+	git tag -a "v$(PACKAGE_VERSION)" -f "RELEASE_NOTES/v$(PACKAGE_VERSION).md"	
+	git push
+	git push --tags
+	@echo "Created git tag v$(PACKAGE_VERSION)! 🏷️"
 
 release: ## release package on PyPI
-	$(MAKE) bump v=$(v)
-	$(MAKE) publish
-	@echo "Released package $(PACKAGE_NAME) version $(PACKAGE_VERSION)! 🚀"
+	gh workflow run release.yml -ref main --field publish=true 
+	@echo "Released version $(PACKAGE_VERSION) to PyPI! 🚀"

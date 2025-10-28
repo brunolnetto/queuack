@@ -1,4 +1,8 @@
 # <img src="https://github.com/brunolnetto/queuack/raw/main/images/logo.png" width="32" alt="Queuack Logo"> Queuack - DuckDB-Powered Job Queue & DAG Engine
+[![Version](https://img.shields.io/pypi/v/queuack.svg)](https://pypi.python.org/pypi/queuack)
+[![codecov](https://codecov.io/github/brunolnetto/queuack/graph/badge.svg?token=N7JC4BP26Q)](https://codecov.io/github/brunolnetto/queuack)
+[![downloads](https://img.shields.io/pypi/dm/queuack)](https://pypi.org/project/queuack/)
+
 
 <img src="https://github.com/brunolnetto/queuack/raw/main/images/mascot.png" width="200" alt="Queuack Mascot">
 
