@@ -349,34 +349,36 @@ class TaskContext:
         This is useful when a task depends on multiple parents and needs to
         access them by name rather than order.
         
+        ⚠️  CRITICAL: This method requires dependency_mode="all"
+        
+        This method expects ALL parent tasks to have completed successfully.
+        If your task uses dependency_mode="any", use upstream_completed() instead.
+        
         Returns:
             Dict mapping parent task names to their results
         
         Raises:
+            ValueError: If dependency_mode="any" (use upstream_completed instead)
             ValueError: If not part of a DAG or parent lookup fails
         
-        Example:
+        Example - Correct usage:
             def combine_data(context):
+                # Task has dependency_mode="all" (default)
                 parents = context.upstream_all()
                 
                 # Access by name
                 api_data = parents["fetch_api"]
                 db_data = parents["fetch_db"]
-                cache_data = parents.get("fetch_cache", None)  # Optional
                 
-                return merge(api_data, db_data, cache_data)
+                return merge(api_data, db_data)
         
-        Example - With validation:
+        Example - Incorrect usage:
             def aggregate(context):
-                parents = context.upstream_all()
+                # Task has dependency_mode="any" - will raise!
+                parents = context.upstream_all()  # ❌ ERROR!
                 
-                required = {"extract_a", "extract_b", "extract_c"}
-                missing = required - set(parents.keys())
-                
-                if missing:
-                    raise ValueError(f"Missing upstream tasks: {missing}")
-                
-                return sum(parents.values())
+                # Use this instead:
+                parents = context.upstream_completed()  # ✅ CORRECT
         """
         if not self.dag_run_id:
             raise ValueError(
@@ -384,9 +386,72 @@ class TaskContext:
                 "This job is not part of a DAG or dag_run_id is missing."
             )
         
+        # CRITICAL CHECK: Verify dependency mode
+        # Query the current job's dependency_mode from the database
+        result = self.queue.conn.execute(
+            "SELECT dependency_mode FROM jobs WHERE id = ?",
+            [self.job_id]
+        ).fetchone()
+        
+        if result and result[0] == 'any':
+            raise ValueError(
+                "upstream_all() cannot be used with dependency_mode='any'. "
+                "When using 'any' mode, only some parents may have completed. "
+                "Use upstream_completed() instead to get only finished parents, "
+                "or use has_upstream() to check for specific parents."
+            )
+        
         parent_names = self.get_parent_names()
         return {name: self.upstream(name) for name in parent_names}
+
+    def upstream_completed(self) -> Dict[str, Any]:
+        """Get results from all COMPLETED parent tasks.
+        
+        Safe to use with dependency_mode="any" - only returns parents
+        that have actually finished execution.
+        
+        Returns:
+            Dict mapping completed parent task names to their results
+        
+        Example:
+            def aggregate(context):
+                # Get whichever parents completed first
+                completed = context.upstream_completed()
+                
+                if "fast_api" in completed:
+                    return completed["fast_api"]
+                elif "slow_db" in completed:
+                    return completed["slow_db"]
+                else:
+                    raise ValueError("No data sources completed")
+        """
+        if not self.dag_run_id:
+            raise ValueError("upstream_completed() requires DAG context...")
+        
+        parent_names = self.get_parent_names()
+        results = {}
+        
+        for name in parent_names:
+            try:
+                results[name] = self.upstream(name)
+            except ValueError:
+                # Parent not done, skip
+                continue
+        
+        return results
     
+    def upstream_any(self) -> Any:
+        """Get result from first completed parent (for ANY mode).
+        
+        Useful when you just need data from whichever source finished first.
+        """
+        completed = self.upstream_completed()
+        if not completed:
+            raise ValueError("No parent tasks completed yet")
+        
+        # Return first completed (arbitrary order)
+        return next(iter(completed.values()))
+
     def has_upstream_any(self, *task_names: str) -> bool:
         """Check if any of the specified upstream tasks exist.
         
