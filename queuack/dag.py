@@ -958,6 +958,13 @@ class DAGContext:
             if kwargs_key not in pickled_kwargs_cache:
                 pickled_kwargs_cache[kwargs_key] = pickle.dumps(spec.kwargs)
 
+            if isinstance(spec.dependency_mode, str):
+                dep_mode_value = spec.dependency_mode
+            elif isinstance(spec.dependency_mode, DependencyMode):
+                dep_mode_value = spec.dependency_mode.value
+            else:
+                dep_mode_value = DependencyMode.ALL.value
+
             job_rows.append(
                 (
                     job_id,
@@ -973,7 +980,7 @@ class DAGContext:
                     spec.timeout_seconds,
                     self.dag_run_id,
                     spec.name,
-                    spec.dependency_mode.value,
+                    dep_mode_value,
                 )
             )
 
