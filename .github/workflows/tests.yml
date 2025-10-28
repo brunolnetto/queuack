@@ -6,6 +6,35 @@ env:
   CI: true
 
 jobs:
+<<<<<<< HEAD:.github/workflows/tests.yml
+=======
+  code-quality:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    name: Analyze the repo with CodeSee
+    steps:
+      - uses: Codesee-io/codesee-action@v2
+        with:
+          codesee-token: ${{ secrets.CODESEE_ARCH_DIAG_API_TOKEN }}
+          codesee-url: https://app.codesee.io
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 3
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+      - name: "Install and run pre-commit via tox"
+        run: |
+          python -m pip install tox==3.27.1 tox-gh-actions
+          python -m tox -vv
+>>>>>>> main:.github/workflows/coverage.yml
   tests:
     runs-on: ubuntu-latest
     defaults:
@@ -21,11 +50,11 @@ jobs:
         uses: actions/checkout@v5
       - name: Set up python
         id: setup-python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install uv (tool, no cache) - create uv.lock
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.5"
           enable-cache: false
@@ -43,7 +72,7 @@ jobs:
           ls -la uv.lock || true
           sed -n '1,200p' uv.lock || true
       - name: Install uv (tool) with cache dependency (uses uv.lock)
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.5"
           enable-cache: true
@@ -69,7 +98,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
