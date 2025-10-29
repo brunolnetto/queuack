@@ -17,6 +17,36 @@ Perfect for dev/test environments and small-to-medium production workloads where
 
 ---
 
+## Table of Contents
+
+- [Why Queuack?](#why-queuack)
+- [Quick Start](#quick-start)
+  - [Installation](#installation)
+  - [Basic Queue (30 seconds)](#basic-queue-30-seconds)
+  - [DAG Workflow (1 minute)](#dag-workflow-1-minute)
+  - [Streaming ETL (2 minutes)](#streaming-etl-2-minutes)
+  - [Async I/O (1 minute)](#async-io-1-minute)
+  - [ML Pipeline (3 minutes)](#ml-pipeline-3-minutes)
+  - [Key Features](#key-features)
+  - [Job Queue](#1-job-queue---redis-free-persistence)
+  - [DAG Workflows](#2-dag-workflows---complex-pipelines-made-simple)
+  - [Memory-Efficient Streaming](#3-memory-efficient-streaming---process-billions-of-rows)
+  - [Beautiful Visualizations](#4-beautiful-visualizations---6-customizable-themes)
+  - [Production-Ready Features](#5-production-ready-features)
+- [Documentation & Examples](#documentation--examples)
+- [Architecture](#architecture)
+- [Configuration & Tuning](#configuration--tuning)
+- [Security Considerations](#security-considerations)
+- [Performance & Scaling](#performance--scaling)
+- [Testing](#testing)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
+- [Support](#support)
+
+---
+
 ## 🎯 Why Queuack?
 
 | Feature | Queuack | Celery + Redis | Airflow | MLflow + Kubeflow |
