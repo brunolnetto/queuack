@@ -320,36 +320,29 @@ Our examples follow a **progressive learning path**:
 - Diamond dependencies
 - Sub-DAGs
 
-#### [04_real_world/](examples/04_real_world) - Production Use Cases
-- ETL pipelines
-- Web scraping
-- Image processing
-- ML training pipelines
-- **NEW!** Streaming ETL (1M+ records)
-- **NEW!** Multi-format exports (JSONL/CSV/Parquet)
-- **NEW!** Async API fetching (50x faster)
-
-#### [05_advanced/](examples/05_advanced) - Advanced Techniques
+#### [04_advanced/](examples/04_advanced) - Advanced Techniques
 - Custom backpressure
 - Monitoring dashboards
 - Distributed workers
-- **NEW!** Custom Mermaid color schemes
+- Custom Mermaid color schemes
+
+#### [05_real_world/](examples/05_real_world) - Production Use Cases
+- ETL pipelines
+- Web scraping
+- Image processing
+- ML training pipelines (see [05_real_world/03_ml/](examples/05_real_world/03_ml/))
+- Streaming ETL (1M+ records)
+- Multi-format exports (JSONL/CSV/Parquet)
+- Async API fetching (50x faster)
 
 #### [06_integration/](examples/06_integration) - Framework Integration
 - Flask, FastAPI, Django
 - CLI tools
 
-#### [07_mlops/](examples/07_mlops) - ML Engineering **NEW!**
-- **Parallel hyperparameter tuning** - Replace Ray/MLflow
-- **Complete ML pipelines** - Replace Airflow/Kubeflow
-- Experiment tracking in SQLite
-- Model training and deployment
-- No Kubernetes required!
-
 **Run any example:**
 ```bash
-cd examples/04_real_world
-python 07_streaming_etl.py
+cd examples/05_real_world
+python 01_web_scraper.py
 ```
 
 ---
@@ -514,18 +507,18 @@ pytest -k "not test_large"
 - [x] Mermaid visualization with themes
 - [x] Sub-DAG support
 - [x] Async/await support for I/O-heavy tasks
+- [x] Job priorities within DAGs
 
 ### In Progress 🚧
-- [ ] Storage backend abstraction (SQLite, PostgreSQL)
-- [ ] Web UI for monitoring
-- [ ] Prometheus metrics
+- [ ] Terminal UI for monitoring
 
 ### Planned 📋
+- [ ] Storage backend abstraction (SQLite, PostgreSQL, Redis, S3)
 - [ ] Scheduled/cron jobs
-- [ ] Job priorities within DAGs
 - [ ] Dynamic DAG generation
 - [ ] Result caching
 - [ ] Job pause/resume
+- [ ] Prometheus metrics
 
 ---
 
