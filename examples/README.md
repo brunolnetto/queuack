@@ -44,35 +44,28 @@ Master complex workflows with dependencies, parallel execution, and conditional 
 - `diamond_dependency.py` - Diamond pattern synchronization
 - `external_dependencies.py` - Reference external jobs
 
-### 04_real_world/ - Production Use Cases
-Real-world examples you can adapt for your projects.
 
-- `etl_pipeline.py` - Complete ETL with error handling
-- `web_scraper.py` - Distributed web scraping with rate limiting
-- `image_processing.py` - Parallel image processing
-- `report_generator.py` - Report generation with parallel data fetching
-- `ml_training_pipeline.py` - ML training with model comparison
-- `07_streaming_etl.py` - **NEW!** Memory-efficient streaming ETL (1M+ records)
-- `08_streaming_formats.py` - **NEW!** Multi-format exports (JSONL/CSV/Parquet/Pickle)
-- `09_async_api_fetching.py` - **NEW!** Async I/O for 10-100x speedup (API requests)
 
-### 05_advanced/ - Advanced Patterns
-Advanced techniques for production deployments.
 
-- `custom_backpressure.py` - Custom backpressure thresholds
-- `monitoring_dashboard.py` - Real-time queue monitoring
-- `distributed_workers.py` - Multi-machine worker deployment
-- `retry_strategies.py` - Advanced retry patterns
-- `dag_visualization.py` - Generate DAG diagrams
-- `06_custom_colors.py` - **NEW!** Custom Mermaid color schemes (6 themes)
+### 04_advanced/ - Advanced Patterns
+Advanced techniques for production deployments and monitoring.
 
-### 06_integrations/ - Framework Integration
-Integrate Queuack with popular web frameworks.
+- `01_custom_backpressure.py` - Custom backpressure thresholds and adaptive policies
+- `02_monitoring_dashboard.py` - Real-time web monitoring dashboard (Chart.js, WebSocket)
+- `03_distributed_workers.py` - Multi-machine worker deployment
+- `04_run_strategies.py` - Advanced retry and backoff strategies
+- `05_dag_visualization.py` - Generate DAG diagrams (Mermaid)
+- `06_custom_colors.py` - Custom Mermaid color schemes (6 themes)
 
-- `flask_api.py` - Flask API with background jobs
-- `fastapi_background.py` - FastAPI async integration
-- `django_tasks.py` - Django background tasks
-- `cli_tool.py` - Command-line management tool
+### 05_real_world/ - Real-World Use Cases
+Production-ready patterns organized by domain:
+
+- `01_etl/` - ETL & Data Pipelines (streaming, Spark, multi-format)
+- `02_web/` - Web scraping, async APIs, image processing
+- `03_ml/` - ML pipelines, hyperparameter tuning, experiment tracking
+- `04_integration/` - Framework integration (Flask, FastAPI, Django, CLI)
+
+See each subfolder for detailed examples and README.
 
 ## Running Examples
 
@@ -109,14 +102,16 @@ python linear_pipeline.py
 python ../02_workers/single_worker.py
 ```
 
+
 ### Real-world ETL Pipeline
 
 ```bash
-cd 04_real_world
-python etl_pipeline.py
+cd 05_real_world/01_etl
+python streaming_etl.py
 
-# Monitor progress
-python ../05_advanced/monitoring_dashboard.py
+# Monitor progress (optional)
+cd ../../04_advanced
+python 02_monitoring_dashboard.py
 ```
 
 ## Best Practices

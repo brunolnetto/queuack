@@ -16,7 +16,7 @@ Demonstrates adaptive backpressure thresholds and load shedding strategies:
 **Run:**
 ```bash
 cd /home/pingu/github/queuack
-PYTHONPATH=/home/pingu/github/queuack python3 examples/05_advanced/01_custom_backpressure.py
+PYTHONPATH=/home/pingu/github/queuack python3 examples/04_advanced/01_custom_backpressure.py
 ```
 
 **Key Concepts:**
@@ -38,7 +38,7 @@ Built-in HTTP server with WebSocket updates for live queue monitoring:
 **Run:**
 ```bash
 cd /home/pingu/github/queuack
-PYTHONPATH=/home/pingu/github/queuack python3 examples/05_advanced/02_monitoring_dashboard.py
+PYTHONPATH=/home/pingu/github/queuack python3 examples/04_advanced/02_monitoring_dashboard.py
 ```
 
 Then open http://localhost:8080 in your browser.
@@ -68,7 +68,7 @@ pip install Flask Flask-SocketIO python-socketio
 **Run:**
 ```bash
 cd /home/pingu/github/queuack
-PYTHONPATH=/home/pingu/github/queuack python3 examples/05_advanced/03_flask_monitoring_dashboard.py
+PYTHONPATH=/home/pingu/github/queuack python3 examples/04_advanced/03_flask_monitoring_dashboard.py
 ```
 
 Then open http://localhost:5000 in your browser.
@@ -95,7 +95,7 @@ For local testing, modify the `db_path` to use a local directory.
 **Run:**
 ```bash
 cd /home/pingu/github/queuack
-PYTHONPATH=/home/pingu/github/queuack python3 examples/05_advanced/03_distributed_workers.py
+PYTHONPATH=/home/pingu/github/queuack python3 examples/04_advanced/03_distributed_workers.py
 ```
 
 **Key Concepts:**
@@ -116,7 +116,7 @@ Implements sophisticated retry strategies with exponential backoff:
 **Run:**
 ```bash
 cd /home/pingu/github/queuack
-PYTHONPATH=/home/pingu/github/queuack python3 examples/05_advanced/04_run_strategies.py
+PYTHONPATH=/home/pingu/github/queuack python3 examples/04_advanced/04_run_strategies.py
 ```
 
 **Key Concepts:**
@@ -124,6 +124,7 @@ PYTHONPATH=/home/pingu/github/queuack python3 examples/05_advanced/04_run_strate
 - Custom retry policies
 - Job failure simulation
 - Delay-based scheduling
+
 
 ### 05_dag_visualization.py
 **DAG Workflow Visualization**
@@ -137,7 +138,7 @@ Generates visual representations of complex job dependencies:
 **Run:**
 ```bash
 cd /home/pingu/github/queuack
-PYTHONPATH=/home/pingu/github/queuack python3 examples/05_advanced/05_dag_visualization.py
+PYTHONPATH=/home/pingu/github/queuack python3 examples/04_advanced/05_dag_visualization.py
 ```
 
 **Key Concepts:**
@@ -145,6 +146,27 @@ PYTHONPATH=/home/pingu/github/queuack python3 examples/05_advanced/05_dag_visual
 - Mermaid diagram generation
 - Complex dependency patterns
 - Workflow visualization
+
+### 06_custom_colors.py
+**Custom Mermaid Color Schemes**
+
+Advanced DAG visualization with custom and pre-built color themes:
+- Use and create custom Mermaid color schemes
+- Status-based coloring for jobs
+- Theme selection for different audiences (dev, prod, accessibility)
+- Generate visualizations for documentation and presentations
+
+**Run:**
+```bash
+cd /home/pingu/github/queuack
+PYTHONPATH=/home/pingu/github/queuack python3 examples/04_advanced/06_custom_colors.py
+```
+
+**Key Concepts:**
+- Custom and pre-built color schemes
+- Status-based coloring
+- Theming for different contexts
+- Enhanced workflow documentation
 
 ## Common Setup
 
@@ -164,7 +186,7 @@ All examples require:
 
 2. Run any example:
    ```bash
-   python3 examples/05_advanced/XX_example_name.py
+   python3 examples/04_advanced/XX_example_name.py
    ```
 
 3. For web-based examples, open the displayed URL in your browser

@@ -4,51 +4,51 @@ Production-ready patterns organized by domain. Each subdirectory contains exampl
 
 ## Domains
 
-### 📊 [01_etl/](01_etl/) - ETL & Data Pipelines
-Process and transform data at scale.
-
-**Examples:**
-- Complete ETL with error handling
-- Apache Spark integration
-- Streaming ETL (1M+ records with ~50MB RAM)
-- Multi-format exports (JSONL/CSV/Parquet/Pickle)
-
-**Key features:** Memory-efficient streaming, Spark orchestration, multiple output formats
-
----
-
-### 🌐 [02_web/](02_web/) - Web Scraping & APIs
-HTTP requests, image processing, and API interactions.
+### 🌐 [01_web/](01_web/) - Web & API
+Web scraping, image processing, async APIs, batch email, and webhook processing.
 
 **Examples:**
 - Distributed web scraping with rate limiting
 - Parallel image processing
 - Report generation with parallel data fetching
-- Async API fetching (50-100x speedup)
+- Async API fetching (50x speedup)
+- Batch email sending with async and DAG parallelization
+- Webhook processing with async, retries, and error handling
 
-**Key features:** Async I/O, rate limiting, concurrent processing, error recovery
+---
+
+### 📊 [02_etl/](02_etl/) - ETL & Data Pipelines
+Production-ready ETL patterns for data engineering workflows.
+
+**Examples:**
+- Complete ETL with error handling
+- Apache Spark integration
+- Streaming ETL (1M+ records, ~50MB RAM)
+- Multi-format exports (JSONL/CSV/Parquet/Pickle)
 
 ---
 
 ### 🤖 [03_ml/](03_ml/) - ML & MLOps
-Replace Airflow, MLflow, and Kubeflow with Python + DuckDB.
+ML pipelines, hyperparameter search, scikit-learn, MLflow, DVC, and PyTorch integration.
 
 **Examples:**
 - Parallel hyperparameter tuning (no Ray needed)
 - Complete ML pipeline orchestration (no Airflow/Kubeflow needed)
-- ML training with model comparison
+- Scikit-learn classification and ensemble pipelines
+- MLflow experiment tracking and model registry
+- DVC data versioning
+- PyTorch + MLflow + DVC full-stack MLOps
 
-**Key features:**
-- **Zero infrastructure** - 50MB RAM vs 4+ GB for traditional MLOps stack
-- **Parallel training** - N workers for N-x speedup
-- **SQLite tracking** - Query experiments with SQL
-- **Local dev** - Same code on laptop and production
+---
 
-**Why Queuack for ML?**
-```
-Traditional: Airflow + MLflow + Kubeflow = 4+ GB RAM + K8s
-Queuack:     Python + SQLite            = 50 MB RAM
-```
+### 🔗 [04_integration/](04_integration/) - Framework Integration
+Integrate Queuack with Flask, FastAPI, Django, and CLI tools.
+
+**Examples:**
+- Flask API with background job processing
+- FastAPI async integration
+- Django background tasks
+- Command-line management tool
 
 ---
 

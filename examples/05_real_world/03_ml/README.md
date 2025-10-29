@@ -27,57 +27,14 @@ Queuack → 50 MB RAM, single SQLite file
 
 ### 01_hyperparameter_tuning.py
 **Parallel hyperparameter search without Ray/MLflow**
-
-```python
-from queuack import DuckQueue
-
-# Generate 54 hyperparameter combinations
-param_grid = generate_param_grid()
-
-# Train all models in parallel
-queue = DuckQueue("experiments.db")
-for params in param_grid:
-    queue.enqueue(train_model, args=(params,))
-
-# Results automatically tracked in SQLite
-```
-
-**Features:**
 - Parallel training (4-16 workers)
 - Automatic result persistence
 - Easy result querying with SQL
 - No MLflow server needed
 - Works on laptop for development
 
-**Use cases:**
-- Grid search / random search
-- Bayesian optimization
-- Neural architecture search
-- Ensemble model training
-
----
-
 ### 02_ml_pipeline.py
 **Complete ML pipeline without Airflow/Kubeflow**
-
-```python
-from queuack import DAG
-
-dag = DAG("ml_pipeline")
-
-# Build pipeline
-dag.add_node(ingest_data, name="ingest")
-dag.add_node(validate_data, name="validate", depends_on=["ingest"])
-dag.add_node(engineer_features, name="features", depends_on=["validate"])
-dag.add_node(train_model, name="train", depends_on=["features"])
-dag.add_node(evaluate_model, name="evaluate", depends_on=["train"])
-dag.add_node(deploy_model, name="deploy", depends_on=["evaluate"])
-
-# Execute
-dag.execute()  # All steps tracked in DuckDB
-```
-
-**Features:**
 - DAG-based orchestration
 - Data validation gates
 - Automatic retries
@@ -85,14 +42,42 @@ dag.execute()  # All steps tracked in DuckDB
 - Progress monitoring
 - Deployment automation
 
-**Use cases:**
-- Daily model retraining
-- Feature engineering pipelines
-- A/B test tracking
-- Model drift monitoring
-- Batch inference jobs
+### 04_sklearn_classification.py
+**Scikit-learn binary classification pipeline**
+- Data loading, preprocessing, feature engineering
+- Model training with cross-validation
+- Model evaluation and selection
+- Production predictions
 
----
+### 05_ml_training_pipeline.py
+**ML training pipeline: model development and deployment**
+- Loads data, preprocesses, trains multiple models in parallel
+- Evaluates and deploys the best model
+- Demonstrates modern MLOps workflows
+
+### 05_sklearn_ensemble.py
+**Scikit-learn ensemble learning pipeline**
+- Parallel training of diverse algorithms
+- Ensemble model creation (voting, stacking)
+- Meta-model training and deployment
+
+### 06_mlflow_experiments.py
+**MLflow + Queuack: experiment tracking integration**
+- Parallel experiment tracking
+- MLflow run management and model registry
+- Hyperparameter logging and metric comparison
+
+### 07_mlflow_model_registry.py
+**MLflow model registry integration**
+- (Template/example for model registry usage)
+
+### 08_dvc_data_versioning.py
+**DVC data versioning integration**
+- (Template/example for DVC usage in ML pipelines)
+
+### 09_pytorch_mlflow_dvc_complete.py
+**PyTorch + MLflow + DVC: complete MLOps pipeline**
+- (Template/example for full-stack MLOps with Queuack)
 
 ## 🚀 Running Examples
 

@@ -4,7 +4,7 @@ Real-world patterns for web scraping, image processing, and API interactions.
 
 ## Examples
 
-### 02_web_scraper.py
+### 01_web_scraper.py
 **Distributed web scraping with rate limiting**
 - Concurrent HTTP requests
 - Rate limiting per domain
@@ -14,7 +14,7 @@ Real-world patterns for web scraping, image processing, and API interactions.
 
 **Difficulty:** intermediate
 
-### 03_image_processing.py
+### 02_image_processing.py
 **Parallel image processing**
 - Batch image transformations
 - Thumbnail generation
@@ -24,7 +24,7 @@ Real-world patterns for web scraping, image processing, and API interactions.
 
 **Difficulty:** intermediate
 
-### 04_report_generation.py
+### 03_report_generation.py
 **Report generation with parallel data fetching**
 - Fetch from multiple sources
 - Aggregate results
@@ -34,13 +34,29 @@ Real-world patterns for web scraping, image processing, and API interactions.
 
 **Difficulty:** intermediate
 
-### 09_async_api_fetching.py
+### 04_async_api_fetching.py
 **Async I/O for 50x speedup (API requests)**
 - Async/await patterns
 - Concurrent API calls
 - 10-100x faster than sync
 - Rate limiting
 - Error recovery
+
+**Difficulty:** intermediate
+
+### 05_batch_email_sender.py
+**Batch email sending with async and DAG parallelization**
+- Send emails in batches using async jobs
+- Parallelize sending with DAG context manager
+- Demo of batch slicing and progress polling
+
+**Difficulty:** intermediate
+
+### 06_webhook_processor.py
+**Webhook processing with async, retries, and error handling**
+- Process incoming webhooks asynchronously
+- Demonstrates retry logic for transient failures
+- Simulates real-world webhook ingestion
 
 **Difficulty:** intermediate
 

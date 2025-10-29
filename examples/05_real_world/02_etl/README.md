@@ -14,7 +14,7 @@ Production-ready ETL patterns for data engineering workflows.
 
 **Difficulty:** intermediate
 
-### 06_spark_etl.py
+### 02_spark_etl.py
 **Integration with Apache Spark**
 - Spark DataFrame transformations
 - Distributed processing
@@ -23,7 +23,7 @@ Production-ready ETL patterns for data engineering workflows.
 
 **Difficulty:** intermediate
 
-### 07_streaming_etl.py
+### 03_streaming_etl.py
 **Memory-efficient streaming ETL (1M+ records)**
 - Constant memory usage (~50MB)
 - Process millions of records
@@ -33,7 +33,7 @@ Production-ready ETL patterns for data engineering workflows.
 
 **Difficulty:** intermediate
 
-### 08_streaming_formats.py
+### 04_streaming_formats.py
 **Multi-format exports (JSONL/CSV/Parquet/Pickle)**
 - Stream to multiple formats
 - Memory-efficient serialization

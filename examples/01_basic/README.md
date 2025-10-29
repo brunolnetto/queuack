@@ -6,6 +6,7 @@ Start here if you're new to Queuack. These examples cover core queue operations,
 
 ## Examples
 
+
 ### 01_simple_queue.py
 **Basic producer/consumer pattern**
 - Create a queue
@@ -13,63 +14,51 @@ Start here if you're new to Queuack. These examples cover core queue operations,
 - Claim and process jobs
 - Basic error handling
 
-```python
-from queuack import DuckQueue
-
-queue = DuckQueue("jobs.db")
-job_id = queue.enqueue(my_function, args=(42,))
-```
-
-**Difficulty:** Beginner
-**Time:** 2 minutes
-
----
-
 ### 02_priority_jobs.py
 **Priority-based job ordering**
 - Set job priorities (0-100)
 - Higher priority = processed first
 - Use cases: urgent vs background tasks
 
-```python
-queue.enqueue(urgent_task, priority=90)
-queue.enqueue(background_task, priority=10)
-```
-
-**Difficulty:** Beginner
-**Time:** 2 minutes
-
----
-
 ### 03_delayed_jobs.py
 **Schedule jobs for future execution**
 - Delay job execution by seconds
 - Use cases: retry delays, scheduled tasks, rate limiting
-
-```python
-# Run in 1 hour
-queue.enqueue(send_reminder, delay_seconds=3600)
-```
-
-**Difficulty:** Beginner
-**Time:** 2 minutes
-
----
 
 ### 04_batch_enqueue.py
 **Efficiently enqueue multiple jobs**
 - Batch operations for better performance
 - Use cases: bulk processing, imports
 
-```python
-jobs = [(task1, (arg1,), {}), (task2, (arg2,), {})]
-job_ids = queue.enqueue_batch(jobs)
-```
+### 05_error_handling.py
+**Error handling and retries**
+- Demonstrates automatic retries for flaky jobs
+- Shows how to handle and log errors
 
-**Difficulty:** Beginner
-**Time:** 2 minutes
+### 06_results_and_dlq.py
+**Results and Dead Letter Queue (DLQ)**
+- Retrieve job results after completion
+- Handle jobs that fail permanently (DLQ)
 
----
+### 07_queue_stats.py
+**Queue stats and monitoring**
+- Monitor queue health and job status counts
+- Print stats before and after processing
+
+### 08_context_manager.py
+**Using DuckQueue as a context manager**
+- Auto-start/stop workers with `with` block
+- Demonstrates background processing
+
+### 09_backpressure.py
+**Backpressure and throttling**
+- Demonstrates `BackpressureError` and producer throttling
+- Shows how to relieve pressure by processing jobs
+
+### 10_purging.py
+**Purging completed jobs**
+- Demonstrates `queue.purge()` to clean up old jobs
+- Shows stats before and after purging
 
 ## Running Examples
 
