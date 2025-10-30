@@ -27,7 +27,7 @@ jobs:
       - name: Install uv (tool, no cache) - create uv.lock
         uses: astral-sh/setup-uv@v7
         with:
-          version: "0.9.5"
+          version: "0.9.7"
           enable-cache: false
       - name: Debug - show repo and python
         run: |
@@ -45,7 +45,7 @@ jobs:
       - name: Install uv (tool) with cache dependency (uses uv.lock)
         uses: astral-sh/setup-uv@v7
         with:
-          version: "0.9.5"
+          version: "0.9.7"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Cache pip and wheelhouse
